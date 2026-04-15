@@ -2,6 +2,8 @@
 Configuración del sistema de alertas de trading
 """
 
+import os
+
 # Configuración de Telegram
 TELEGRAM_BOT_TOKEN = "7897536624:AAHHofbqCGckXmOCjnlt8oQ0EKS5hiGfIpE"  # Token real del bot WonderS
 TELEGRAM_CHAT_ID = "1551875559"                                      # Tu ID de Telegram
@@ -16,6 +18,10 @@ BTC_SYMBOL = "BTCUSDT"           # Par de Bitcoin a monitorear con prioridad
 
 # Diversificación por ecosistemas (se calculará dinámicamente según el total)
 COINS_PER_ECOSYSTEM = 7          # Valor orientativo; el sistema lo ajustará automáticamente
+
+# Control de alertas repetitivas
+ALERT_COOLDOWN_HOURS = 4         # No enviar otra alerta de la misma moneda hasta pasadas X horas
+COOLDOWN_FILE = os.path.join(os.path.dirname(__file__), "alert_cooldown.json")  # Archivo persistente
 
 # Intervalos de tiempo para soportes/resistencias
 SR_PERIODS = {

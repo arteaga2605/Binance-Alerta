@@ -1,13 +1,11 @@
 ================================================================================
                     SISTEMA DE ALERTAS DE TRADING - BINANCE + TELEGRAM
-                               CÓDIGO COMPLETO DE TODOS LOS ARCHIVOS
+                               VERSIÓN 1.0 FINAL
 ================================================================================
 
-A continuación se listan todos los archivos necesarios para el sistema.
-Cada archivo está precedido por una línea con el formato:
-========== NOMBRE_DEL_ARCHIVO ==========
-
-Debes crear los archivos con los nombres indicados y pegar el contenido correspondiente.
+Este documento contiene todos los archivos del proyecto. Cada archivo está delimitado
+por una línea como: ========== NOMBRE_DEL_ARCHIVO ==========
+Crea los archivos con los nombres indicados y pega el contenido correspondiente.
 
 ================================================================================
 ========== config.py ==========
@@ -16,17 +14,26 @@ Debes crear los archivos con los nombres indicados y pegar el contenido correspo
 Configuración del sistema de alertas de trading
 """
 
+import os
+
 # Configuración de Telegram
-TELEGRAM_BOT_TOKEN = "TU_TOKEN_DE_BOT_AQUI"  # ⚠️ Reemplazar con tu token real de BotFather
-TELEGRAM_CHAT_ID = "1551875559"               # Tu ID de Telegram
+TELEGRAM_BOT_TOKEN = "7897536624:AAHHofbqCGckXmOCjnlt8oQ0EKS5hiGfIpE"  # Token real del bot WonderS
+TELEGRAM_CHAT_ID = "1551875559"                                      # Tu ID de Telegram
 TELEGRAM_BOT_NAME = "WonderS"
 
 # Configuración de trading
 MARGIN_PERCENTAGE = 1.0          # Margen de sensibilidad del 1%
 TIMEFRAME_ENTRY = "4h"           # Temporalidad para las operaciones
-LOW_CAP_VOLUME_THRESHOLD = 10_000_000  # Volumen mínimo 24h en USDT para considerar "baja capitalización"
-NUM_COINS_TO_MONITOR = 10        # Número de monedas a monitorear (mínimo 10)
+LOW_CAP_VOLUME_THRESHOLD = 50_000_000  # Volumen máximo 24h en USDT (50M) para incluir más monedas
+NUM_COINS_TO_MONITOR = 50        # Ahora analiza al menos 50 monedas
 BTC_SYMBOL = "BTCUSDT"           # Par de Bitcoin a monitorear con prioridad
+
+# Diversificación por ecosistemas (se calculará dinámicamente según el total)
+COINS_PER_ECOSYSTEM = 7          # Valor orientativo; el sistema lo ajustará automáticamente
+
+# Control de alertas repetitivas
+ALERT_COOLDOWN_HOURS = 4         # No enviar otra alerta de la misma moneda hasta pasadas X horas
+COOLDOWN_FILE = os.path.join(os.path.dirname(__file__), "alert_cooldown.json")  # Archivo persistente
 
 # Intervalos de tiempo para soportes/resistencias
 SR_PERIODS = {
@@ -41,6 +48,418 @@ EXCLUDED_SYMBOLS = [
 ]
 
 ================================================================================
+========== ecosystems.py ==========
+================================================================================
+"""
+Definición de ecosistemas de criptomonedas para diversificar la selección.
+Cada ecosistema contiene una lista de símbolos de Binance (pares USDT).
+Se ha ampliado la lista para asegurar al menos 50 monedas seleccionables.
+"""
+
+ECOSYSTEMS = {
+    "AI": [
+        "FETUSDT", "AGIXUSDT", "OCEANUSDT", "NMRUSDT", "CTXCUSDT",
+        "MDTUSDT", "RLCUSDT", "DATAUSDT", "VIDTUSDT", "PHBUSDT",
+        "NKNUSDT", "ARKMUSDT", "WLDUSDT", "TAOUSDT", "PRIMEUSDT"
+    ],
+    "DeFi": [
+        "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "SNXUSDT",
+        "CRVUSDT", "SUSHIUSDT", "YFIUSDT", "BALUSDT", "1INCHUSDT",
+        "LDOUSDT", "RPLUSDT", "FXSUSDT", "PENDLEUSDT", "RDNTUSDT"
+    ],
+    "Meme": [
+        "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "BONKUSDT",
+        "WIFUSDT", "MEMEUSDT", "PEOPLEUSDT", "TURBOUSDT", "BABYDOGEUSDT",
+        "COQUSDT", "MYROUSDT", "WENUSDT", "SLERFUSDT", "SAMOUSDT"
+    ],
+    "Layer1": [
+        "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT", "AVAXUSDT",
+        "DOTUSDT", "NEARUSDT", "ATOMUSDT", "FTMUSDT", "ALGOUSDT",
+        "ICPUSDT", "HBARUSDT", "EGLDUSDT", "FLOWUSDT", "ROSEUSDT"
+    ],
+    "Layer2": [
+        "MATICUSDT", "ARBUSDT", "OPUSDT", "IMXUSDT", "LRCUSDT",
+        "SKLUSDT", "CELRUSDT", "OMGUSDT", "ZKSUSDT", "STRKUSDT",
+        "METISUSDT", "BOBAUSDT", "COTIUSDT", "MINAUSDT", "AZEROUSDT"
+    ],
+    "Gaming": [
+        "AXSUSDT", "SANDUSDT", "MANAUSDT", "ENJUSDT", "GALAUSDT",
+        "ILVUSDT", "ALICEUSDT", "TLMUSDT", "DARUSDT", "VOXELUSDT",
+        "MCUSDT", "PYRUSDT", "YGGUSDT", "BIGTIMEUSDT", "NAKAUSDT"
+    ],
+    "Oracle": [
+        "LINKUSDT", "BANDUSDT", "TRBUSDT", "API3USDT", "UMAUSDT",
+        "DIAUSDT", "PYTHUSDT"
+    ],
+    "Storage": [
+        "FILUSDT", "ARUSDT", "STORJUSDT", "SCUSDT", "ANKRUSDT",
+        "HOTUSDT", "BLZUSDT"
+    ],
+    "RWA": [
+        "CFGUSDT", "TRUUSDT", "RIOUSDT", "SNXUSDT", "MKRUSDT",
+        "ONDOUSDT", "TOKENUSDT"
+    ]
+}
+
+# Mapeo inverso: símbolo -> ecosistema
+SYMBOL_TO_ECOSYSTEM = {}
+for eco, symbols in ECOSYSTEMS.items():
+    for sym in symbols:
+        SYMBOL_TO_ECOSYSTEM[sym] = eco
+
+
+def get_ecosystem_for_symbol(symbol: str) -> str:
+    """Retorna el ecosistema de un símbolo, o 'Other' si no está definido."""
+    return SYMBOL_TO_ECOSYSTEM.get(symbol, "Other")
+
+================================================================================
+========== coin_names.py ==========
+================================================================================
+"""
+Mapeo de símbolos de Binance a nombres completos de monedas.
+Este diccionario se usa para mostrar nombres legibles en las alertas de Telegram.
+"""
+
+COIN_NAMES = {
+    # Bitcoin
+    "BTC": "Bitcoin",
+    "BTCUSDT": "Bitcoin",
+    
+    # Altcoins populares
+    "ETH": "Ethereum",
+    "ETHUSDT": "Ethereum",
+    "BNB": "Binance Coin",
+    "BNBUSDT": "Binance Coin",
+    "SOL": "Solana",
+    "SOLUSDT": "Solana",
+    "ADA": "Cardano",
+    "ADAUSDT": "Cardano",
+    "AVAX": "Avalanche",
+    "AVAXUSDT": "Avalanche",
+    "DOT": "Polkadot",
+    "DOTUSDT": "Polkadot",
+    "NEAR": "NEAR Protocol",
+    "NEARUSDT": "NEAR Protocol",
+    "ATOM": "Cosmos",
+    "ATOMUSDT": "Cosmos",
+    "FTM": "Fantom",
+    "FTMUSDT": "Fantom",
+    "ALGO": "Algorand",
+    "ALGOUSDT": "Algorand",
+    "ICP": "Internet Computer",
+    "ICPUSDT": "Internet Computer",
+    "HBAR": "Hedera",
+    "HBARUSDT": "Hedera",
+    "EGLD": "MultiversX",
+    "EGLDUSDT": "MultiversX",
+    "FLOW": "Flow",
+    "FLOWUSDT": "Flow",
+    "ROSE": "Oasis Network",
+    "ROSEUSDT": "Oasis Network",
+    
+    # DeFi
+    "UNI": "Uniswap",
+    "UNIUSDT": "Uniswap",
+    "AAVE": "Aave",
+    "AAVEUSDT": "Aave",
+    "MKR": "Maker",
+    "MKRUSDT": "Maker",
+    "COMP": "Compound",
+    "COMPUSDT": "Compound",
+    "SNX": "Synthetix",
+    "SNXUSDT": "Synthetix",
+    "CRV": "Curve DAO",
+    "CRVUSDT": "Curve DAO",
+    "SUSHI": "SushiSwap",
+    "SUSHIUSDT": "SushiSwap",
+    "YFI": "yearn.finance",
+    "YFIUSDT": "yearn.finance",
+    "BAL": "Balancer",
+    "BALUSDT": "Balancer",
+    "1INCH": "1inch Network",
+    "1INCHUSDT": "1inch Network",
+    "LDO": "Lido DAO",
+    "LDOUSDT": "Lido DAO",
+    "RPL": "Rocket Pool",
+    "RPLUSDT": "Rocket Pool",
+    "FXS": "Frax Share",
+    "FXSUSDT": "Frax Share",
+    "PENDLE": "Pendle",
+    "PENDLEUSDT": "Pendle",
+    "RDNT": "Radiant Capital",
+    "RDNTUSDT": "Radiant Capital",
+    
+    # Layer 2
+    "MATIC": "Polygon",
+    "MATICUSDT": "Polygon",
+    "ARB": "Arbitrum",
+    "ARBUSDT": "Arbitrum",
+    "OP": "Optimism",
+    "OPUSDT": "Optimism",
+    "IMX": "Immutable X",
+    "IMXUSDT": "Immutable X",
+    "LRC": "Loopring",
+    "LRCUSDT": "Loopring",
+    "SKL": "SKALE",
+    "SKLUSDT": "SKALE",
+    "CELR": "Celer Network",
+    "CELRUSDT": "Celer Network",
+    "OMG": "OMG Network",
+    "OMGUSDT": "OMG Network",
+    "ZKS": "ZKsync",
+    "ZKSUSDT": "ZKsync",
+    "STRK": "StarkNet",
+    "STRKUSDT": "StarkNet",
+    "METIS": "Metis",
+    "METISUSDT": "Metis",
+    "BOBA": "Boba Network",
+    "BOBAUSDT": "Boba Network",
+    "COTI": "COTI",
+    "COTIUSDT": "COTI",
+    "MINA": "Mina Protocol",
+    "MINAUSDT": "Mina Protocol",
+    "AZERO": "Aleph Zero",
+    "AZEROUSDT": "Aleph Zero",
+    
+    # AI
+    "FET": "Fetch.ai",
+    "FETUSDT": "Fetch.ai",
+    "AGIX": "SingularityNET",
+    "AGIXUSDT": "SingularityNET",
+    "OCEAN": "Ocean Protocol",
+    "OCEANUSDT": "Ocean Protocol",
+    "NMR": "Numeraire",
+    "NMRUSDT": "Numeraire",
+    "CTXC": "Cortex",
+    "CTXCUSDT": "Cortex",
+    "MDT": "Measurable Data Token",
+    "MDTUSDT": "Measurable Data Token",
+    "RLC": "iExec RLC",
+    "RLCUSDT": "iExec RLC",
+    "DATA": "Streamr",
+    "DATAUSDT": "Streamr",
+    "VIDT": "VIDT DAO",
+    "VIDTUSDT": "VIDT DAO",
+    "PHB": "Phoenix",
+    "PHBUSDT": "Phoenix",
+    "NKN": "NKN",
+    "NKNUSDT": "NKN",
+    "ARKM": "Arkham",
+    "ARKMUSDT": "Arkham",
+    "WLD": "Worldcoin",
+    "WLDUSDT": "Worldcoin",
+    "TAO": "Bittensor",
+    "TAOUSDT": "Bittensor",
+    "PRIME": "Echelon Prime",
+    "PRIMEUSDT": "Echelon Prime",
+    
+    # Meme
+    "DOGE": "Dogecoin",
+    "DOGEUSDT": "Dogecoin",
+    "SHIB": "Shiba Inu",
+    "SHIBUSDT": "Shiba Inu",
+    "PEPE": "Pepe",
+    "PEPEUSDT": "Pepe",
+    "FLOKI": "Floki",
+    "FLOKIUSDT": "Floki",
+    "BONK": "Bonk",
+    "BONKUSDT": "Bonk",
+    "WIF": "dogwifhat",
+    "WIFUSDT": "dogwifhat",
+    "MEME": "Memecoin",
+    "MEMEUSDT": "Memecoin",
+    "PEOPLE": "ConstitutionDAO",
+    "PEOPLEUSDT": "ConstitutionDAO",
+    "TURBO": "Turbo",
+    "TURBOUSDT": "Turbo",
+    "BABYDOGE": "Baby Doge Coin",
+    "BABYDOGEUSDT": "Baby Doge Coin",
+    "COQ": "Coq Inu",
+    "COQUSDT": "Coq Inu",
+    "MYRO": "Myro",
+    "MYROUSDT": "Myro",
+    "WEN": "Wen",
+    "WENUSDT": "Wen",
+    "SLERF": "Slerf",
+    "SLERFUSDT": "Slerf",
+    "SAMO": "Samoyedcoin",
+    "SAMOUSDT": "Samoyedcoin",
+    
+    # Gaming
+    "AXS": "Axie Infinity",
+    "AXSUSDT": "Axie Infinity",
+    "SAND": "The Sandbox",
+    "SANDUSDT": "The Sandbox",
+    "MANA": "Decentraland",
+    "MANAUSDT": "Decentraland",
+    "ENJ": "Enjin Coin",
+    "ENJUSDT": "Enjin Coin",
+    "GALA": "Gala",
+    "GALAUSDT": "Gala",
+    "ILV": "Illuvium",
+    "ILVUSDT": "Illuvium",
+    "ALICE": "My Neighbor Alice",
+    "ALICEUSDT": "My Neighbor Alice",
+    "TLM": "Alien Worlds",
+    "TLMUSDT": "Alien Worlds",
+    "DAR": "Mines of Dalarnia",
+    "DARUSDT": "Mines of Dalarnia",
+    "VOXEL": "Voxies",
+    "VOXELUSDT": "Voxies",
+    "MC": "Merit Circle",
+    "MCUSDT": "Merit Circle",
+    "PYR": "Vulcan Forged",
+    "PYRUSDT": "Vulcan Forged",
+    "YGG": "Yield Guild Games",
+    "YGGUSDT": "Yield Guild Games",
+    "BIGTIME": "Big Time",
+    "BIGTIMEUSDT": "Big Time",
+    "NAKA": "Nakamoto Games",
+    "NAKAUSDT": "Nakamoto Games",
+    
+    # Oracle
+    "LINK": "Chainlink",
+    "LINKUSDT": "Chainlink",
+    "BAND": "Band Protocol",
+    "BANDUSDT": "Band Protocol",
+    "TRB": "Tellor",
+    "TRBUSDT": "Tellor",
+    "API3": "API3",
+    "API3USDT": "API3",
+    "UMA": "UMA",
+    "UMAUSDT": "UMA",
+    "DIA": "DIA",
+    "DIAUSDT": "DIA",
+    "PYTH": "Pyth Network",
+    "PYTHUSDT": "Pyth Network",
+    
+    # Storage
+    "FIL": "Filecoin",
+    "FILUSDT": "Filecoin",
+    "AR": "Arweave",
+    "ARUSDT": "Arweave",
+    "STORJ": "Storj",
+    "STORJUSDT": "Storj",
+    "SC": "Siacoin",
+    "SCUSDT": "Siacoin",
+    "ANKR": "Ankr",
+    "ANKRUSDT": "Ankr",
+    "HOT": "Holo",
+    "HOTUSDT": "Holo",
+    "BLZ": "Bluzelle",
+    "BLZUSDT": "Bluzelle",
+    
+    # RWA
+    "CFG": "Centrifuge",
+    "CFGUSDT": "Centrifuge",
+    "TRU": "TrueFi",
+    "TRUUSDT": "TrueFi",
+    "RIO": "Realio Network",
+    "RIOUSDT": "Realio Network",
+    "ONDO": "Ondo Finance",
+    "ONDOUSDT": "Ondo Finance",
+    "TOKEN": "TokenFi",
+    "TOKENUSDT": "TokenFi",
+    
+    # Otros
+    "XRP": "Ripple",
+    "XRPUSDT": "Ripple",
+    "LTC": "Litecoin",
+    "LTCUSDT": "Litecoin",
+    "BCH": "Bitcoin Cash",
+    "BCHUSDT": "Bitcoin Cash",
+    "XLM": "Stellar",
+    "XLMUSDT": "Stellar",
+    "TRX": "TRON",
+    "TRXUSDT": "TRON",
+    "ETC": "Ethereum Classic",
+    "ETCUSDT": "Ethereum Classic",
+    "EOS": "EOS",
+    "EOSUSDT": "EOS",
+    "VET": "VeChain",
+    "VETUSDT": "VeChain",
+    "THETA": "Theta Network",
+    "THETAUSDT": "Theta Network",
+    "GRT": "The Graph",
+    "GRTUSDT": "The Graph",
+    "CHZ": "Chiliz",
+    "CHZUSDT": "Chiliz",
+    "ZIL": "Zilliqa",
+    "ZILUSDT": "Zilliqa",
+    "BAT": "Basic Attention Token",
+    "BATUSDT": "Basic Attention Token",
+    "ZRX": "0x",
+    "ZRXUSDT": "0x",
+    "KNC": "Kyber Network",
+    "KNCUSDT": "Kyber Network",
+    "DGB": "DigiByte",
+    "DGBUSDT": "DigiByte",
+    "DOCK": "Dock",
+    "DOCKUSDT": "Dock",
+    "FRONT": "Frontier",
+    "FRONTUSDT": "Frontier",
+    "VITE": "Vite",
+    "VITEUSDT": "Vite",
+    "DUSK": "Dusk Network",
+    "DUSKUSDT": "Dusk Network",
+    "PERL": "Perlin",
+    "PERLUSDT": "Perlin",
+    "REI": "REI Network",
+    "REIUSDT": "REI Network",
+    "STX": "Stacks",
+    "STXUSDT": "Stacks",
+    "CFX": "Conflux",
+    "CFXUSDT": "Conflux",
+    "KAS": "Kaspa",
+    "KASUSDT": "Kaspa",
+    "SEI": "Sei",
+    "SEIUSDT": "Sei",
+    "SUI": "Sui",
+    "SUIUSDT": "Sui",
+    "APT": "Aptos",
+    "APTUSDT": "Aptos",
+    "TIA": "Celestia",
+    "TIAUSDT": "Celestia",
+    "JTO": "Jito",
+    "JTOUSDT": "Jito",
+    "JUP": "Jupiter",
+    "JUPUSDT": "Jupiter",
+    "W": "Wormhole",
+    "WUSDT": "Wormhole",
+    "ENA": "Ethena",
+    "ENAUSDT": "Ethena",
+    "ETHFI": "Ether.fi",
+    "ETHFIUSDT": "Ether.fi",
+    "ALT": "AltLayer",
+    "ALTUSDT": "AltLayer",
+    "MANTA": "Manta Network",
+    "MANTAUSDT": "Manta Network",
+    "XAI": "Xai",
+    "XAIUSDT": "Xai",
+    "ACE": "Fusionist",
+    "ACEUSDT": "Fusionist",
+    "NFP": "NFPrompt",
+    "NFPUSDT": "NFPrompt",
+    "AI": "Sleepless AI",
+    "AIUSDT": "Sleepless AI",
+    "PORTAL": "Portal",
+    "PORTALUSDT": "Portal",
+    "RNDR": "Render Token",
+    "RNDRUSDT": "Render Token",
+    "INJ": "Injective",
+    "INJUSDT": "Injective"
+}
+
+def get_full_name(symbol: str) -> str:
+    """
+    Retorna el nombre completo de una moneda a partir de su símbolo.
+    Si no se encuentra, retorna el símbolo original.
+    """
+    # Eliminar USDT del final si está presente
+    base_symbol = symbol.replace("USDT", "") if symbol.endswith("USDT") else symbol
+    return COIN_NAMES.get(base_symbol, symbol)
+
+================================================================================
 ========== binance_client.py ==========
 ================================================================================
 """
@@ -51,10 +470,11 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import config
+from ecosystems import ECOSYSTEMS, get_ecosystem_for_symbol
 
 
 class BinanceClient:
@@ -65,17 +485,74 @@ class BinanceClient:
         self._ticker_cache = None
         self._ticker_cache_time = None
         self._cache_duration = 60  # 1 minuto de caché
+        self._spot_symbols_cache = None
+        self._futures_symbols_cache = None
+
+    def get_spot_symbols(self) -> Set[str]:
+        """
+        Obtiene todos los símbolos disponibles en Spot trading.
+        """
+        if self._spot_symbols_cache is not None:
+            return self._spot_symbols_cache
+
+        try:
+            exchange_info = self.client.get_exchange_info()
+            symbols = set()
+            for s in exchange_info['symbols']:
+                if s['status'] == 'TRADING':
+                    symbols.add(s['symbol'])
+            self._spot_symbols_cache = symbols
+            return symbols
+        except Exception as e:
+            print(f"Error obteniendo símbolos Spot: {e}")
+            return set()
+
+    def get_futures_symbols(self) -> Set[str]:
+        """
+        Obtiene todos los símbolos disponibles en Futuros (USDⓈ-M y COIN-M).
+        """
+        if self._futures_symbols_cache is not None:
+            return self._futures_symbols_cache
+
+        symbols = set()
+        try:
+            # USDⓈ-M Futures
+            um_exchange_info = self.client.futures_exchange_info()
+            for s in um_exchange_info['symbols']:
+                if s['status'] == 'TRADING':
+                    symbols.add(s['symbol'])
+        except Exception as e:
+            print(f"Error obteniendo símbolos USDⓈ-M Futures: {e}")
+
+        try:
+            # COIN-M Futures
+            cm_exchange_info = self.client.futures_coin_exchange_info()
+            for s in cm_exchange_info['symbols']:
+                if s['status'] == 'TRADING':
+                    symbols.add(s['symbol'])
+        except Exception as e:
+            print(f"Error obteniendo símbolos COIN-M Futures: {e}")
+
+        self._futures_symbols_cache = symbols
+        return symbols
+
+    def get_tradable_symbols(self) -> Set[str]:
+        """
+        Obtiene la unión de símbolos disponibles en Spot y Futuros.
+        """
+        spot = self.get_spot_symbols()
+        futures = self.get_futures_symbols()
+        return spot.union(futures)
 
     def get_all_usdt_pairs(self) -> List[str]:
         """
-        Obtiene todos los pares que terminan en USDT
+        Obtiene todos los pares que terminan en USDT y están disponibles en Spot o Futuros.
         """
         try:
-            exchange_info = self.client.get_exchange_info()
+            tradable = self.get_tradable_symbols()
             symbols = []
-            for s in exchange_info['symbols']:
-                if s['symbol'].endswith('USDT') and s['status'] == 'TRADING':
-                    symbol = s['symbol']
+            for symbol in tradable:
+                if symbol.endswith('USDT'):
                     # Excluir stablecoins y pares no deseados
                     if symbol not in config.EXCLUDED_SYMBOLS:
                         symbols.append(symbol)
@@ -103,7 +580,9 @@ class BinanceClient:
 
     def get_low_cap_altcoins(self, limit: int = None) -> List[str]:
         """
-        Identifica altcoins de baja capitalización basado en volumen 24h
+        Identifica altcoins de baja/media capitalización basado en volumen 24h,
+        diversificando por ecosistemas y garantizando al menos 'limit' monedas.
+        Solo incluye monedas disponibles en Spot o Futuros.
         """
         if limit is None:
             limit = config.NUM_COINS_TO_MONITOR
@@ -112,36 +591,98 @@ class BinanceClient:
         usdt_pairs = self.get_all_usdt_pairs()
         usdt_set = set(usdt_pairs)
 
-        # Filtrar pares USDT válidos y calcular "capitalización estimada"
+        # Filtrar pares USDT válidos con volumen dentro del umbral
         candidates = []
         for ticker in tickers:
             symbol = ticker['symbol']
             if symbol not in usdt_set:
                 continue
             if symbol == config.BTC_SYMBOL:
-                continue  # BTC se maneja por separado
+                continue
 
             try:
-                volume = float(ticker['quoteVolume'])  # Volumen en USDT
+                volume = float(ticker['quoteVolume'])
                 last_price = float(ticker['lastPrice'])
 
-                # Solo considerar pares con volumen significativo pero bajo
                 if volume > 0 and volume < config.LOW_CAP_VOLUME_THRESHOLD:
+                    eco = get_ecosystem_for_symbol(symbol)
                     candidates.append({
                         'symbol': symbol,
                         'volume': volume,
                         'price': last_price,
-                        'change_24h': float(ticker['priceChangePercent'])
+                        'change_24h': float(ticker['priceChangePercent']),
+                        'ecosystem': eco
                     })
             except (KeyError, ValueError, TypeError):
                 continue
 
-        # Ordenar por volumen (menor a mayor = más baja capitalización)
-        candidates.sort(key=lambda x: x['volume'])
+        # Agrupar candidatos por ecosistema
+        by_ecosystem = {}
+        for c in candidates:
+            eco = c['ecosystem']
+            if eco not in by_ecosystem:
+                by_ecosystem[eco] = []
+            by_ecosystem[eco].append(c)
 
-        # Seleccionar las de menor volumen
-        selected = candidates[:limit]
-        return [c['symbol'] for c in selected]
+        # Ordenar cada grupo por volumen ascendente (menor volumen = más baja cap)
+        for eco in by_ecosystem:
+            by_ecosystem[eco].sort(key=lambda x: x['volume'])
+
+        # Calcular cuántas monedas tomar por ecosistema para alcanzar el límite
+        defined_ecos = list(ECOSYSTEMS.keys())
+        num_ecos = len(defined_ecos)
+        per_eco_base = max(2, limit // num_ecos)  # Al menos 2 por ecosistema
+        extra = limit % num_ecos
+
+        selected = []
+        # Primera pasada: tomar 'per_eco_base' monedas de cada ecosistema definido
+        for i, eco_name in enumerate(defined_ecos):
+            if eco_name not in by_ecosystem:
+                continue
+            take = per_eco_base
+            if i < extra:
+                take += 1
+            for coin in by_ecosystem[eco_name][:take]:
+                selected.append(coin['symbol'])
+            # Eliminar para no repetir en la siguiente fase
+            by_ecosystem[eco_name] = by_ecosystem[eco_name][take:]
+
+        # Si aún faltan monedas, tomar del ecosistema "Other"
+        if len(selected) < limit:
+            remaining = []
+            for eco, coins in by_ecosystem.items():
+                remaining.extend(coins)
+            remaining.sort(key=lambda x: x['volume'])
+            for coin in remaining:
+                if len(selected) >= limit:
+                    break
+                if coin['symbol'] not in selected:
+                    selected.append(coin['symbol'])
+
+        # Si todavía faltan, recurrir a lista de respaldo ampliada
+        if len(selected) < limit:
+            fallback = self._get_fallback_coins()
+            for fb in fallback:
+                if fb not in selected and fb != config.BTC_SYMBOL:
+                    selected.append(fb)
+                    if len(selected) >= limit:
+                        break
+
+        return selected[:limit]
+
+    def _get_fallback_coins(self) -> List[str]:
+        """Lista de respaldo amplia de altcoins de baja/media capitalización"""
+        return [
+            "TRUUSDT", "COTIUSDT", "REIUSDT", "DGBUSDT", "DOCKUSDT",
+            "FRONTUSDT", "NKNUSDT", "VITEUSDT", "DUSKUSDT", "PERLUSDT",
+            "FETUSDT", "AGIXUSDT", "UNIUSDT", "AAVEUSDT", "DOGEUSDT",
+            "SHIBUSDT", "PEPEUSDT", "WIFUSDT", "BONKUSDT", "FLOKIUSDT",
+            "ARBUSDT", "OPUSDT", "LDOUSDT", "RNDRUSDT", "INJUSDT",
+            "STXUSDT", "CFXUSDT", "KASUSDT", "SEIUSDT", "SUIUSDT",
+            "APTUSDT", "TIAUSDT", "JTOUSDT", "PYTHUSDT", "JUPUSDT",
+            "WUSDT", "ENAUSDT", "ETHFIUSDT", "ALTUSDT", "MANTAUSDT",
+            "XAIUSDT", "ACEUSDT", "NFPUSDT", "AIUSDT", "PORTALUSDT"
+        ]
 
     def get_historical_klines(self, symbol: str, interval: str,
                               lookback_days: int = 30) -> pd.DataFrame:
@@ -149,11 +690,9 @@ class BinanceClient:
         Obtiene velas históricas para un símbolo
         """
         try:
-            # Calcular fecha de inicio
             end_time = datetime.now()
             start_time = end_time - timedelta(days=lookback_days)
 
-            # Mapear intervalos
             interval_map = {
                 "1w": Client.KLINE_INTERVAL_1WEEK,
                 "1M": Client.KLINE_INTERVAL_1MONTH,
@@ -179,7 +718,6 @@ class BinanceClient:
                 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
             ])
 
-            # Convertir a numérico
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = pd.to_numeric(df[col])
 
@@ -235,6 +773,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional
 from scipy.signal import argrelextrema
 from sklearn.cluster import KMeans
+import warnings
 import config
 
 
@@ -282,17 +821,25 @@ class SupportResistanceCalculator:
         if not levels or len(levels) < 2:
             return levels
 
-        # Limpiar niveles
-        levels = sorted([l for l in levels if l > 0])
+        # Limpiar niveles: eliminar duplicados y ordenar
+        levels = sorted(list(set([l for l in levels if l > 0])))
 
+        # Si hay menos niveles únicos que clusters deseados, devolver los niveles directamente
         if len(levels) <= n_clusters:
             return levels
 
         try:
+            # Ajustar n_clusters para que no exceda el número de muestras únicas
+            actual_clusters = min(n_clusters, len(levels))
+
             X = np.array(levels).reshape(-1, 1)
-            kmeans = KMeans(n_clusters=min(n_clusters, len(levels)),
-                           random_state=42, n_init=10)
-            kmeans.fit(X)
+
+            # Suprimir warnings de convergencia de KMeans
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                kmeans = KMeans(n_clusters=actual_clusters,
+                                random_state=42, n_init='auto')
+                kmeans.fit(X)
 
             # Obtener centros de los clusters
             centers = sorted([c[0] for c in kmeans.cluster_centers_])
@@ -304,9 +851,6 @@ class SupportResistanceCalculator:
                     merged.append(center)
                 elif abs(center - merged[-1]) / merged[-1] > eps:
                     merged.append(center)
-                else:
-                    # Mantener el centro del cluster con más elementos
-                    pass
 
             return merged
 
@@ -419,16 +963,46 @@ class SupportResistanceCalculator:
 Detector de alertas cuando el precio toca soportes o resistencias
 """
 
+import json
+import os
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timedelta
 import config
 
 
 class AlertDetector:
-    """Detector de alertas de trading"""
+    """Detector de alertas de trading con persistencia de cooldown"""
 
     def __init__(self, margin_percent: float = None):
         self.margin_percent = margin_percent or config.MARGIN_PERCENTAGE
-        self.last_alerts = {}  # Para evitar alertas repetitivas
+        self.cooldown_hours = getattr(config, 'ALERT_COOLDOWN_HOURS', 4)
+        self.cooldown_file = getattr(config, 'COOLDOWN_FILE', 'alert_cooldown.json')
+        self.last_alerts = self._load_cooldown()
+
+    def _load_cooldown(self) -> Dict[str, str]:
+        """
+        Carga el registro de últimas alertas desde el archivo JSON.
+        Retorna un diccionario con clave = symbol, valor = timestamp ISO.
+        """
+        if not os.path.exists(self.cooldown_file):
+            return {}
+        try:
+            with open(self.cooldown_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ Error cargando archivo de cooldown: {e}. Se usará diccionario vacío.")
+            return {}
+
+    def _save_cooldown(self):
+        """
+        Guarda el registro de últimas alertas en el archivo JSON.
+        """
+        try:
+            with open(self.cooldown_file, 'w', encoding='utf-8') as f:
+                json.dump(self.last_alerts, f, indent=2)
+        except IOError as e:
+            print(f"⚠️ Error guardando archivo de cooldown: {e}")
 
     def is_near_level(self, current_price: float, level: float) -> bool:
         """
@@ -441,9 +1015,10 @@ class AlertDetector:
         return diff_percent <= self.margin_percent
 
     def find_near_levels(self, current_price: float,
-                         levels: List[float]) -> List[Tuple[float, str]]:
+                         levels: List[float]) -> List[Tuple[float, str, float]]:
         """
-        Encuentra niveles cercanos al precio actual
+        Encuentra niveles cercanos al precio actual.
+        Retorna lista de tuplas: (nivel, tipo, diferencia_porcentual)
         """
         near_levels = []
         for level in levels:
@@ -453,13 +1028,15 @@ class AlertDetector:
                     level_type = "SOPORTE"
                 else:
                     level_type = "RESISTENCIA"
-                near_levels.append((level, level_type))
+                diff = ((current_price - level) / level) * 100
+                near_levels.append((level, level_type, diff))
         return near_levels
 
     def check_coin_alerts(self, symbol: str, current_price: float,
                           sr_levels: Dict) -> List[Dict]:
         """
-        Verifica alertas para una moneda específica
+        Verifica alertas para una moneda específica.
+        Ahora solo retorna UNA alerta por moneda (la más cercana) si no está en cooldown.
         """
         alerts = []
 
@@ -470,54 +1047,67 @@ class AlertDetector:
 
         near_levels = self.find_near_levels(current_price, all_levels)
 
-        for level, level_type in near_levels:
-            # Determinar origen del nivel (semanal o mensual)
-            origin = []
-            if level in sr_levels.get('weekly', {}).get('support', []):
-                origin.append('Soporte Semanal')
-            if level in sr_levels.get('weekly', {}).get('resistance', []):
-                origin.append('Resistencia Semanal')
-            if level in sr_levels.get('monthly', {}).get('support', []):
-                origin.append('Soporte Mensual')
-            if level in sr_levels.get('monthly', {}).get('resistance', []):
-                origin.append('Resistencia Mensual')
+        if not near_levels:
+            return alerts
 
-            origin_str = ' / '.join(origin) if origin else level_type
+        # Seleccionar el nivel más cercano (menor diferencia absoluta)
+        best = min(near_levels, key=lambda x: abs(x[2]))
+        best_level, best_type, best_diff = best
 
-            diff_percent = ((current_price - level) / level) * 100
+        # Determinar origen del nivel (semanal o mensual)
+        origin = []
+        if best_level in sr_levels.get('weekly', {}).get('support', []):
+            origin.append('Soporte Semanal')
+        if best_level in sr_levels.get('weekly', {}).get('resistance', []):
+            origin.append('Resistencia Semanal')
+        if best_level in sr_levels.get('monthly', {}).get('support', []):
+            origin.append('Soporte Mensual')
+        if best_level in sr_levels.get('monthly', {}).get('resistance', []):
+            origin.append('Resistencia Mensual')
 
-            alert = {
-                'symbol': symbol,
-                'current_price': current_price,
-                'level': level,
-                'level_type': level_type,
-                'origin': origin_str,
-                'diff_percent': diff_percent,
-                'timestamp': None  # Se añadirá después
-            }
+        origin_str = ' / '.join(origin) if origin else best_type
 
-            # Evitar alertas duplicadas en corto tiempo
-            alert_key = f"{symbol}_{level}_{level_type}"
-            if self.should_send_alert(alert_key):
-                alerts.append(alert)
-                self.last_alerts[alert_key] = current_price
+        alert = {
+            'symbol': symbol,
+            'current_price': current_price,
+            'level': best_level,
+            'level_type': best_type,
+            'origin': origin_str,
+            'diff_percent': best_diff,
+            'timestamp': datetime.now()
+        }
+
+        # Verificar si debemos enviar esta alerta (control de cooldown)
+        if self.should_send_alert(symbol):
+            alerts.append(alert)
+            # Actualizar el tiempo de la última alerta para esta moneda
+            self.last_alerts[symbol] = datetime.now().isoformat()
+            self._save_cooldown()
 
         return alerts
 
-    def should_send_alert(self, alert_key: str) -> bool:
+    def should_send_alert(self, symbol: str) -> bool:
         """
-        Verifica si se debe enviar una alerta (evita spam)
+        Verifica si se debe enviar una alerta para un símbolo.
+        Retorna True si no hay alerta previa o si ha pasado el cooldown.
         """
-        if alert_key not in self.last_alerts:
+        if symbol not in self.last_alerts:
             return True
 
-        # Aquí se podría añadir lógica de tiempo, por ahora siempre alerta
-        return True
+        last_time_str = self.last_alerts[symbol]
+        try:
+            last_time = datetime.fromisoformat(last_time_str)
+        except ValueError:
+            # Si el formato no es válido, asumir que nunca se envió
+            return True
+
+        cooldown_delta = timedelta(hours=self.cooldown_hours)
+        return (datetime.now() - last_time) >= cooldown_delta
 
     def analyze_all_coins(self, prices: Dict[str, float],
                           sr_data: Dict[str, Dict]) -> List[Dict]:
         """
-        Analiza todas las monedas y retorna alertas
+        Analiza todas las monedas y retorna alertas (máximo una por moneda, con cooldown)
         """
         all_alerts = []
 
@@ -536,7 +1126,7 @@ class AlertDetector:
         # Luego analizar altcoins
         for symbol, price in prices.items():
             if symbol == config.BTC_SYMBOL:
-                continue  # Ya analizado
+                continue
 
             if symbol in sr_data:
                 alerts = self.check_coin_alerts(symbol, price, sr_data[symbol])
@@ -558,6 +1148,7 @@ import requests
 from typing import List, Dict
 from datetime import datetime
 import config
+from coin_names import get_full_name
 
 
 class TelegramNotifier:
@@ -638,7 +1229,8 @@ class TelegramNotifier:
 
     def _format_single_alert(self, alert: Dict) -> str:
         """Formatea una alerta individual"""
-        symbol = alert['symbol'].replace('USDT', '')
+        symbol = alert['symbol']
+        full_name = get_full_name(symbol)
         price = alert['current_price']
         level = alert['level']
         diff = alert['diff_percent']
@@ -647,7 +1239,7 @@ class TelegramNotifier:
         direction = "▲" if diff > 0 else "▼"
 
         lines = [
-            f"{emoji} <b>${symbol}</b> {emoji}",
+            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')}) {emoji}",
             f"   💰 Precio actual: <code>${price:.8f}</code>",
             f"   📍 Nivel ({alert['level_type']}): <code>${level:.8f}</code>",
             f"   📈 Diferencia: {direction} {abs(diff):.2f}%",
@@ -713,8 +1305,6 @@ class CryptoAlertSystem:
         self.sr_calc = SupportResistanceCalculator(order=3)
         self.detector = AlertDetector()
         self.notifier = TelegramNotifier()
-
-        # Para seguimiento de monedas analizadas
         self.monitored_coins = []
 
     def get_coins_to_monitor(self) -> List[str]:
@@ -722,11 +1312,8 @@ class CryptoAlertSystem:
         Obtiene la lista de monedas a monitorear (BTC + altcoins low cap)
         """
         coins = []
-
-        # BTC siempre incluido
         coins.append(config.BTC_SYMBOL)
 
-        # Obtener altcoins de baja capitalización
         print("📊 Buscando altcoins de baja capitalización...")
         altcoins = self.binance.get_low_cap_altcoins(limit=config.NUM_COINS_TO_MONITOR)
 
@@ -747,7 +1334,8 @@ class CryptoAlertSystem:
         """Lista de respaldo de altcoins de baja capitalización"""
         return [
             "TRUUSDT", "COTIUSDT", "REIUSDT", "DGBUSDT", "DOCKUSDT",
-            "FRONTUSDT", "NKNUSDT", "VITEUSDT", "DUSKUSDT", "PERLUSDT"
+            "FRONTUSDT", "NKNUSDT", "VITEUSDT", "DUSKUSDT", "PERLUSDT",
+            "FETUSDT", "AGIXUSDT", "UNIUSDT", "AAVEUSDT", "DOGEUSDT"
         ]
 
     def fetch_historical_data(self, symbols: List[str]) -> Dict[str, Dict]:
@@ -760,12 +1348,9 @@ class CryptoAlertSystem:
         for i, symbol in enumerate(symbols, 1):
             print(f"   [{i}/{len(symbols)}] Procesando {symbol}...", end=" ")
 
-            # Datos semanales
             weekly_df = self.binance.get_historical_klines(
                 symbol, "1w", lookback_days=90
             )
-
-            # Datos mensuales
             monthly_df = self.binance.get_historical_klines(
                 symbol, "1M", lookback_days=180
             )
@@ -774,7 +1359,6 @@ class CryptoAlertSystem:
                 print("❌ Sin datos")
                 continue
 
-            # Calcular niveles
             levels = self.sr_calc.get_all_levels(symbol, weekly_df, monthly_df)
             sr_data[symbol] = levels
 
@@ -792,7 +1376,10 @@ class CryptoAlertSystem:
         prices = self.binance.get_multiple_prices(symbols)
 
         for symbol, price in prices.items():
-            print(f"   {symbol}: ${price:.8f}" if price < 1 else f"   {symbol}: ${price:.4f}")
+            if price < 1:
+                print(f"   {symbol}: ${price:.8f}")
+            else:
+                print(f"   {symbol}: ${price:.4f}")
 
         return prices
 
@@ -804,23 +1391,16 @@ class CryptoAlertSystem:
         print(f"🚀 INICIANDO ANÁLISIS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*50)
 
-        # 1. Obtener monedas a monitorear
         coins = self.get_coins_to_monitor()
-
-        # 2. Obtener datos históricos y calcular S/R
         sr_data = self.fetch_historical_data(coins)
-
-        # 3. Obtener precios actuales
         symbols_with_data = list(sr_data.keys())
         prices = self.fetch_current_prices(symbols_with_data)
 
-        # 4. Detectar alertas
         print("\n🔍 Detectando niveles cercanos (margen {}%)...".format(
             config.MARGIN_PERCENTAGE
         ))
         alerts = self.detector.analyze_all_coins(prices, sr_data)
 
-        # 5. Mostrar resumen
         print(f"\n📊 RESUMEN DEL ANÁLISIS:")
         print(f"   Monedas analizadas: {len(symbols_with_data)}")
         print(f"   Alertas detectadas: {len(alerts)}")
@@ -844,7 +1424,6 @@ class CryptoAlertSystem:
                     self.notifier.send_alerts(alerts)
                 else:
                     print("\n✅ No se detectaron alertas.")
-                    # Opcional: enviar mensaje de estado
                     self.notifier.send_status_update(
                         len(self.monitored_coins), len(alerts)
                     )
@@ -870,7 +1449,6 @@ def main():
     ╚══════════════════════════════════════════════╝
     """)
 
-    # Verificar configuración de Telegram
     if config.TELEGRAM_BOT_TOKEN == "TU_TOKEN_DE_BOT_AQUI":
         print("⚠️ ADVERTENCIA: Token de Telegram no configurado.")
         print("   Las alertas se mostrarán solo en consola.")
@@ -906,7 +1484,6 @@ class AlertScheduler:
         self.system = CryptoAlertSystem()
         self.running = True
 
-        # Configurar señales para cierre graceful
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
@@ -938,14 +1515,11 @@ class AlertScheduler:
     ╚══════════════════════════════════════════════╝
         """)
 
-        # Programar tarea cada 5 minutos
         schedule.every(5).minutes.do(self.run_analysis_job)
 
-        # Ejecutar inmediatamente la primera vez
         print("🚀 Ejecutando primer análisis...")
         self.run_analysis_job()
 
-        # Bucle principal
         print("\n⏳ Esperando próxima ejecución...")
         print("   Presiona Ctrl+C para detener.\n")
 
@@ -1003,18 +1577,20 @@ requests>=2.31.0
 ================================================================================
 # 🚀 Sistema de Alertas de Trading - Binance + Telegram
 
-Sistema automatizado que monitorea BTC y altcoins de baja capitalización en Binance, detecta cuando los precios se acercan a niveles de soporte/resistencia y envía alertas a Telegram.
+Sistema automatizado que monitorea BTC y 50 altcoins de baja/media capitalización en Binance, detecta cuando los precios se acercan a niveles de soporte/resistencia y envía alertas a Telegram.
 
 ## ✨ Características
 
 - 📡 Conexión a API pública de Binance (sin necesidad de API keys)
-- 📊 Análisis de al menos 10 monedas (BTC + 9 altcoins low-cap)
+- 📊 Análisis de 50 monedas (BTC + 49 altcoins) diversificadas por ecosistemas (AI, DeFi, Meme, L1, L2, Gaming, etc.)
 - 📈 Cálculo de soportes y resistencias semanales y mensuales
 - 🔔 Detección de toques con margen de sensibilidad del 1%
 - 🔥 Prioridad para alertas de BTC
-- 📱 Notificaciones a Telegram
+- 📱 Notificaciones a Telegram con nombres completos de monedas
 - ⏱️ Ejecución manual o automática cada 5 minutos
 - 🎯 Enfoque en temporalidad de 4 horas para entradas
+- 🛡️ Cooldown de 4 horas para evitar alertas repetitivas (persistente en JSON)
+- 🏦 Filtro por disponibilidad en Spot o Futuros de Binance
 
 ## 📋 Requisitos
 
@@ -1024,8 +1600,49 @@ Sistema automatizado que monitorea BTC y altcoins de baja capitalización en Bin
 
 ## 🔧 Instalación
 
-### 1. Clonar o descargar el proyecto
+1. Clonar o descargar el proyecto
+2. Crear entorno virtual: `python -m venv venv`
+3. Activar entorno:
+   - Linux/Mac: `source venv/bin/activate`
+   - Windows: `venv\Scripts\activate`
+4. Instalar dependencias: `pip install -r requirements.txt`
 
-```bash
-unzip crypto_alert_system.zip
-cd crypto_alert_system
+## ⚙️ Configuración
+
+1. Crear un Bot de Telegram con @BotFather y obtener el token.
+2. Obtener tu Chat ID.
+3. Editar `config.py` con el token y chat ID.
+
+## 🚀 Uso
+
+- Ejecución manual: `python main.py`
+- Ejecución automática (cada 5 min): `python scheduler.py`
+
+## 📁 Estructura del Proyecto
+
+crypto_alert_system/
+├── config.py # Configuración central
+├── ecosystems.py # Definición de ecosistemas
+├── coin_names.py # Mapeo de nombres completos
+├── binance_client.py # Cliente API Binance (filtro Spot/Futuros)
+├── sr_calculator.py # Cálculo de soportes/resistencias
+├── alert_detector.py # Detección de alertas con cooldown persistente
+├── telegram_notifier.py # Envío a Telegram (nombres completos)
+├── main.py # Script principal
+├── scheduler.py # Programador automático
+├── requirements.txt # Dependencias
+└── README.md # Este archivo
+
+
+## ⚠️ Notas
+
+- Sin API Key: El sistema usa solo endpoints públicos.
+- El cooldown se guarda en `alert_cooldown.json`.
+- Si el token no está configurado, las alertas se muestran en consola.
+
+---
+*Sistema desarrollado para análisis de trading - Usar bajo tu propio riesgo*
+
+================================================================================
+                            FIN DEL DOCUMENTO - VERSIÓN 1.0
+================================================================================

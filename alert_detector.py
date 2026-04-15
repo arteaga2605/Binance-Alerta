@@ -2,16 +2,47 @@
 Detector de alertas cuando el precio toca soportes o resistencias
 """
 
+import json
+import os
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timedelta
 import config
 
 
 class AlertDetector:
-    """Detector de alertas de trading"""
+    """Detector de alertas de trading con persistencia de cooldown"""
 
     def __init__(self, margin_percent: float = None):
         self.margin_percent = margin_percent or config.MARGIN_PERCENTAGE
-        self.last_alerts = {}  # Para evitar alertas repetitivas
+        self.cooldown_hours = getattr(config, 'ALERT_COOLDOWN_HOURS', 4)
+        self.cooldown_file = getattr(config, 'COOLDOWN_FILE', 'alert_cooldown.json')
+        self.last_alerts = self._load_cooldown()
+
+    def _load_cooldown(self) -> Dict[str, str]:
+        """
+        Carga el registro de últimas alertas desde el archivo JSON.
+        Retorna un diccionario con clave = symbol, valor = timestamp ISO.
+        """
+        if not os.path.exists(self.cooldown_file):
+            return {}
+        try:
+            with open(self.cooldown_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Convertir timestamps de string a datetime para uso interno (no es necesario, solo almacenamos string)
+                return data
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ Error cargando archivo de cooldown: {e}. Se usará diccionario vacío.")
+            return {}
+
+    def _save_cooldown(self):
+        """
+        Guarda el registro de últimas alertas en el archivo JSON.
+        """
+        try:
+            with open(self.cooldown_file, 'w', encoding='utf-8') as f:
+                json.dump(self.last_alerts, f, indent=2)
+        except IOError as e:
+            print(f"⚠️ Error guardando archivo de cooldown: {e}")
 
     def is_near_level(self, current_price: float, level: float) -> bool:
         """
@@ -45,7 +76,7 @@ class AlertDetector:
                           sr_levels: Dict) -> List[Dict]:
         """
         Verifica alertas para una moneda específica.
-        Ahora solo retorna UNA alerta por moneda (la más cercana).
+        Ahora solo retorna UNA alerta por moneda (la más cercana) si no está en cooldown.
         """
         alerts = []
 
@@ -83,29 +114,40 @@ class AlertDetector:
             'level_type': best_type,
             'origin': origin_str,
             'diff_percent': best_diff,
-            'timestamp': None
+            'timestamp': datetime.now()
         }
 
-        # Evitar alertas duplicadas en corto tiempo
-        alert_key = f"{symbol}_{best_level}_{best_type}"
-        if self.should_send_alert(alert_key):
+        # Verificar si debemos enviar esta alerta (control de cooldown)
+        if self.should_send_alert(symbol):
             alerts.append(alert)
-            self.last_alerts[alert_key] = current_price
+            # Actualizar el tiempo de la última alerta para esta moneda
+            self.last_alerts[symbol] = datetime.now().isoformat()
+            self._save_cooldown()
 
         return alerts
 
-    def should_send_alert(self, alert_key: str) -> bool:
+    def should_send_alert(self, symbol: str) -> bool:
         """
-        Verifica si se debe enviar una alerta (evita spam)
+        Verifica si se debe enviar una alerta para un símbolo.
+        Retorna True si no hay alerta previa o si ha pasado el cooldown.
         """
-        if alert_key not in self.last_alerts:
+        if symbol not in self.last_alerts:
             return True
-        return True
+
+        last_time_str = self.last_alerts[symbol]
+        try:
+            last_time = datetime.fromisoformat(last_time_str)
+        except ValueError:
+            # Si el formato no es válido, asumir que nunca se envió
+            return True
+
+        cooldown_delta = timedelta(hours=self.cooldown_hours)
+        return (datetime.now() - last_time) >= cooldown_delta
 
     def analyze_all_coins(self, prices: Dict[str, float],
                           sr_data: Dict[str, Dict]) -> List[Dict]:
         """
-        Analiza todas las monedas y retorna alertas (máximo una por moneda)
+        Analiza todas las monedas y retorna alertas (máximo una por moneda, con cooldown)
         """
         all_alerts = []
 
