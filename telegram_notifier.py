@@ -39,85 +39,128 @@ class TelegramNotifier:
             print(f"Error enviando mensaje a Telegram: {e}")
             return False
 
-    def format_alert_message(self, alerts: List[Dict]) -> str:
+    def format_combined_message(self, sr_alerts: List[Dict], macd_alerts: List[Dict]) -> str:
         """
-        Formatea las alertas para enviar a Telegram
+        Formatea las alertas de ambos analistas en un solo mensaje.
         """
-        if not alerts:
-            return ""
-
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # Separar alertas de BTC (prioridad) y altcoins
-        btc_alerts = [a for a in alerts if a.get('is_btc', False)]
-        other_alerts = [a for a in alerts if not a.get('is_btc', False)]
-
         lines = [
-            "🚨 <b>ALERTAS DE TRADING</b> 🚨",
+            "🚨 <b>ALERTAS DE TRADING v2.0</b> 🚨",
             f"📅 {now}",
-            "═" * 30
+            "═" * 35
         ]
 
-        # Alertas de BTC primero (prioridad)
-        if btc_alerts:
-            lines.append("")
-            lines.append("🔥 <b>⚠️ ALERTA PRIORITARIA - BITCOIN ⚠️</b> 🔥")
-            lines.append("")
-            for alert in btc_alerts:
-                lines.append(self._format_single_alert(alert))
-            lines.append("")
-            lines.append("💡 <i>Recuerda: cuando BTC se mueve, las altcoins lo siguen</i>")
+        # Sección S/R
+        lines.append("")
+        lines.append("📊 <b>ANÁLISIS DE SOPORTE/RESISTENCIA</b>")
+        lines.append("─" * 35)
+        if sr_alerts:
+            btc_sr = [a for a in sr_alerts if a.get('is_btc', False)]
+            other_sr = [a for a in sr_alerts if not a.get('is_btc', False)]
+            if btc_sr:
+                lines.append("🔥 <b>BITCOIN (PRIORITARIO)</b>")
+                for alert in btc_sr:
+                    lines.append(self._format_sr_alert(alert))
+            if other_sr:
+                if btc_sr:
+                    lines.append("")
+                for alert in other_sr:
+                    lines.append(self._format_sr_alert(alert))
+        else:
+            lines.append("✅ Sin señales S/R en este ciclo.")
 
-        # Alertas de altcoins
-        if other_alerts:
-            if btc_alerts:
-                lines.append("")
-                lines.append("─" * 30)
-            lines.append("")
-            lines.append("📊 <b>ALTCOINS EN NIVELES CLAVE</b>")
-            lines.append("")
-            for alert in other_alerts:
-                lines.append(self._format_single_alert(alert))
+        # Sección MACD
+        lines.append("")
+        lines.append("📈 <b>ANÁLISIS MACD</b>")
+        lines.append("─" * 35)
+        if macd_alerts:
+            btc_macd = [a for a in macd_alerts if a.get('is_btc', False)]
+            other_macd = [a for a in macd_alerts if not a.get('is_btc', False)]
+            if btc_macd:
+                lines.append("🔥 <b>BITCOIN (PRIORITARIO)</b>")
+                for alert in btc_macd:
+                    lines.append(self._format_macd_alert(alert))
+            if other_macd:
+                if btc_macd:
+                    lines.append("")
+                for alert in other_macd:
+                    lines.append(self._format_macd_alert(alert))
+        else:
+            lines.append("✅ Sin señales MACD en este ciclo.")
 
         lines.append("")
-        lines.append("═" * 30)
-        lines.append(f"🤖 <i>Bot: {config.TELEGRAM_BOT_NAME}</i>")
+        lines.append("═" * 35)
+        lines.append(f"🤖 <i>Bot: {config.TELEGRAM_BOT_NAME} (v2.0)</i>")
 
         return "\n".join(lines)
 
-    def _format_single_alert(self, alert: Dict) -> str:
-        """Formatea una alerta individual"""
+    def _format_sr_alert(self, alert: Dict) -> str:
+        """Formatea una alerta de S/R."""
         symbol = alert['symbol']
         full_name = get_full_name(symbol)
         price = alert['current_price']
         level = alert['level']
         diff = alert['diff_percent']
-
         emoji = "🔴" if alert['level_type'] == "RESISTENCIA" else "🟢"
         direction = "▲" if diff > 0 else "▼"
 
-        lines = [
-            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')}) {emoji}",
-            f"   💰 Precio actual: <code>${price:.8f}</code>",
-            f"   📍 Nivel ({alert['level_type']}): <code>${level:.8f}</code>",
-            f"   📈 Diferencia: {direction} {abs(diff):.2f}%",
+        return (
+            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})\n"
+            f"   💰 Precio: ${price:.8f}\n"
+            f"   📍 Nivel ({alert['level_type']}): ${level:.8f}\n"
+            f"   📈 Diferencia: {direction} {abs(diff):.2f}%\n"
             f"   🏷️ Origen: {alert['origin']}"
-        ]
-        return "\n".join(lines)
+        )
 
-    def send_alerts(self, alerts: List[Dict]) -> bool:
+    def _format_macd_alert(self, alert: Dict) -> str:
+        """Formatea una alerta MACD."""
+        symbol = alert['symbol']
+        full_name = get_full_name(symbol)
+        price = alert['current_price']
+        signal_type = alert['signal_type']
+        macd_val = alert['macd_value']
+        signal_val = alert['signal_value']
+        hist = alert['histogram']
+
+        if signal_type == 'bullish':
+            emoji = "📈🐂"
+            text_signal = "CRUCE ALCISTA (MACD > Señal)"
+        else:
+            emoji = "📉🐻"
+            text_signal = "CRUCE BAJISTA (MACD < Señal)"
+
+        return (
+            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})\n"
+            f"   💰 Precio: ${price:.8f}\n"
+            f"   📊 MACD: {macd_val:.8f} | Señal: {signal_val:.8f}\n"
+            f"   📉 Histograma: {hist:.8f}\n"
+            f"   ⏱️ Temporalidad análisis: {alert['analysis_timeframe']}\n"
+            f"   🏷️ Señal: {text_signal}"
+        )
+
+    def send_combined_alerts(self, sr_alerts: List[Dict], macd_alerts: List[Dict]) -> bool:
         """
-        Envía todas las alertas formateadas a Telegram
+        Envía todas las alertas (S/R y MACD) en un solo mensaje estructurado.
         """
-        if not alerts:
+        if not sr_alerts and not macd_alerts:
             print("✅ No hay alertas para enviar.")
             return True
 
-        message = self.format_alert_message(alerts)
+        message = self.format_combined_message(sr_alerts, macd_alerts)
         return self.send_message(message)
 
-    def send_status_update(self, coins_analyzed: int,
-                           total_alerts: int) -> bool:
+    def send_alerts(self, alerts: List[Dict]) -> bool:
+        """
+        Método legacy (compatibilidad). Se recomienda usar send_combined_alerts.
+        """
+        if not alerts:
+            return True
+        # Distinguir por campo 'analyst' para mantener compatibilidad
+        sr = [a for a in alerts if a.get('analyst') == 'S/R']
+        macd = [a for a in alerts if a.get('analyst') == 'MACD']
+        return self.send_combined_alerts(sr, macd)
+
+    def send_status_update(self, coins_analyzed: int, total_alerts: int) -> bool:
         """
         Envía un mensaje de estado del sistema
         """

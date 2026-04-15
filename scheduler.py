@@ -18,7 +18,6 @@ class AlertScheduler:
         self.system = CryptoAlertSystem()
         self.running = True
 
-        # Configurar señales para cierre graceful
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
@@ -45,19 +44,16 @@ class AlertScheduler:
         """Inicia el programador"""
         print("""
     ╔══════════════════════════════════════════════╗
-    ║   🤖 SISTEMA DE ALERTAS AUTOMÁTICO         ║
+    ║   🤖 SISTEMA DE ALERTAS AUTOMÁTICO v2.0    ║
     ║   Ejecución cada 5 minutos                  ║
     ╚══════════════════════════════════════════════╝
         """)
 
-        # Programar tarea cada 5 minutos
         schedule.every(5).minutes.do(self.run_analysis_job)
 
-        # Ejecutar inmediatamente la primera vez
         print("🚀 Ejecutando primer análisis...")
         self.run_analysis_job()
 
-        # Bucle principal
         print("\n⏳ Esperando próxima ejecución...")
         print("   Presiona Ctrl+C para detener.\n")
 
