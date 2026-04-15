@@ -34,7 +34,7 @@ MACD_ATR_MULTIPLIER = 1.5
 
 # Configuración de evaluación de rendimiento
 EVALUATION_HOURS = 24                # Plazo para evaluar una alerta (horas)
-MIN_MOVE_THRESHOLD_PERCENT = 0.5     # Movimiento mínimo para considerar acierto (%)
+MIN_MOVE_THRESHOLD_PERCENT = 5.0 # Movimiento mínimo para considerar acierto (%)
 DATABASE_FILE = os.path.join(os.path.dirname(__file__), "alerts_history.db")
 REPORT_IMAGE_FILE = os.path.join(os.path.dirname(__file__), "analysts_performance.png")
 
