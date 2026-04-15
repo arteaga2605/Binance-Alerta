@@ -134,7 +134,7 @@ class CryptoAlertSystem:
 
         coins = self.get_coins_to_monitor()
 
-        # Ejecutar ambos análisis (pueden ser en paralelo, pero secuencial es más simple)
+        # Ejecutar ambos análisis
         sr_alerts = self.run_sr_analysis(coins)
         macd_alerts = self.run_macd_analysis(coins)
 

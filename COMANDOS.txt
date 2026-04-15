@@ -3,3 +3,6 @@ python main.py
 
 # Para ejecución automática cada 5 minutos:
 python scheduler.py
+
+Para generar el reporte y gráfico
+python report_generator.py

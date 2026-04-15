@@ -10,6 +10,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import config
+from performance_tracker import PerformanceTracker
 
 
 class MACDAnalyzer:
@@ -26,6 +27,7 @@ class MACDAnalyzer:
         self.atr_period = getattr(config, 'MACD_ATR_PERIOD', 14)
         self.atr_multiplier = getattr(config, 'MACD_ATR_MULTIPLIER', 1.5)
         self.last_alerts = self._load_cooldown()
+        self.tracker = PerformanceTracker()
 
     def _load_cooldown(self) -> Dict[str, str]:
         """Carga el registro de últimas alertas MACD desde JSON."""
@@ -156,7 +158,6 @@ class MACDAnalyzer:
         if atr is not None and current_price > 0:
             move_abs = atr * self.atr_multiplier
             percent = (move_abs / current_price) * 100
-            # Para señal bajista, el movimiento esperado es negativo
             if cross == 'bearish':
                 potential_move_percent = -percent
             else:
@@ -177,6 +178,8 @@ class MACDAnalyzer:
         }
 
         self.update_cooldown(symbol)
+        # Registrar alerta en la base de datos de rendimiento
+        self.tracker.register_alert(alert)
         return alert
 
     def analyze_multiple(self, symbols: List[str]) -> List[Dict]:

@@ -7,6 +7,7 @@ import os
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 import config
+from performance_tracker import PerformanceTracker
 
 
 class AlertDetector:
@@ -17,6 +18,7 @@ class AlertDetector:
         self.cooldown_hours = getattr(config, 'ALERT_COOLDOWN_HOURS', 4)
         self.cooldown_file = getattr(config, 'COOLDOWN_FILE', 'alert_cooldown.json')
         self.last_alerts = self._load_cooldown()
+        self.tracker = PerformanceTracker()
 
     def _load_cooldown(self) -> Dict[str, str]:
         """Carga el registro de últimas alertas desde el archivo JSON."""
@@ -71,24 +73,19 @@ class AlertDetector:
         Retorna el porcentaje de cambio (positivo si es alcista, negativo si es bajista).
         """
         if level_type == "RESISTENCIA":
-            # Buscar el soporte más cercano que esté por debajo del precio actual
             supports = sr_levels.get('supports', [])
-            # Filtrar soportes por debajo del precio actual (o nivel)
             valid_supports = [s for s in supports if s < current_price]
             if valid_supports:
-                # El más cercano (el mayor de los que están por debajo)
                 next_level = max(valid_supports)
                 move_percent = ((next_level - current_price) / current_price) * 100
-                return move_percent  # Será negativo (bajista)
+                return move_percent
         else:  # SOPORTE
-            # Buscar la resistencia más cercana por encima del precio actual
             resistances = sr_levels.get('resistances', [])
             valid_resistances = [r for r in resistances if r > current_price]
             if valid_resistances:
-                # La más cercana (la menor de las que están por encima)
                 next_level = min(valid_resistances)
                 move_percent = ((next_level - current_price) / current_price) * 100
-                return move_percent  # Será positivo (alcista)
+                return move_percent
         return None
 
     def check_coin_alerts(self, symbol: str, current_price: float,
@@ -148,6 +145,8 @@ class AlertDetector:
             alerts.append(alert)
             self.last_alerts[symbol] = datetime.now().isoformat()
             self._save_cooldown()
+            # Registrar alerta en la base de datos de rendimiento
+            self.tracker.register_alert(alert)
 
         return alerts
 
