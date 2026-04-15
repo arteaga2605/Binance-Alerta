@@ -1,0 +1,5 @@
+# Para una ejecución única:
+python main.py
+
+# Para ejecución automática cada 5 minutos:
+python scheduler.py

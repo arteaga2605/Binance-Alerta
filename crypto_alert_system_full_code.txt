@@ -1,0 +1,1031 @@
+================================================================================
+                    SISTEMA DE ALERTAS DE TRADING - BINANCE + TELEGRAM
+                               CÓDIGO COMPLETO DE TODOS LOS ARCHIVOS
+================================================================================
+
+A continuación se listan todos los archivos necesarios para el sistema.
+Cada archivo está precedido por una línea con el formato:
+========== NOMBRE_DEL_ARCHIVO ==========
+
+Debes crear los archivos con los nombres indicados y pegar el contenido correspondiente.
+
+================================================================================
+========== config.py ==========
+================================================================================
+"""
+Configuración del sistema de alertas de trading
+"""
+
+# Configuración de Telegram
+TELEGRAM_BOT_TOKEN = "TU_TOKEN_DE_BOT_AQUI"  # ⚠️ Reemplazar con tu token real de BotFather
+TELEGRAM_CHAT_ID = "1551875559"               # Tu ID de Telegram
+TELEGRAM_BOT_NAME = "WonderS"
+
+# Configuración de trading
+MARGIN_PERCENTAGE = 1.0          # Margen de sensibilidad del 1%
+TIMEFRAME_ENTRY = "4h"           # Temporalidad para las operaciones
+LOW_CAP_VOLUME_THRESHOLD = 10_000_000  # Volumen mínimo 24h en USDT para considerar "baja capitalización"
+NUM_COINS_TO_MONITOR = 10        # Número de monedas a monitorear (mínimo 10)
+BTC_SYMBOL = "BTCUSDT"           # Par de Bitcoin a monitorear con prioridad
+
+# Intervalos de tiempo para soportes/resistencias
+SR_PERIODS = {
+    "1_week": "1w",    # 1 semana
+    "1_month": "1M"    # 1 mes
+}
+
+# Pares excluidos (stablecoins, pares no deseados)
+EXCLUDED_SYMBOLS = [
+    "USDCUSDT", "BUSDUSDT", "DAIUSDT", "USDPUSDT", "TUSDUSDT",
+    "USDCBUSD", "USDCUSDC", "EURUSDT", "GBPUSDT"
+]
+
+================================================================================
+========== binance_client.py ==========
+================================================================================
+"""
+Cliente para interactuar con la API pública de Binance
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import time
+from typing import List, Dict, Optional
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+import config
+
+
+class BinanceClient:
+    """Cliente para la API pública de Binance (no requiere autenticación)"""
+
+    def __init__(self):
+        self.client = Client("", "")  # API pública no requiere keys
+        self._ticker_cache = None
+        self._ticker_cache_time = None
+        self._cache_duration = 60  # 1 minuto de caché
+
+    def get_all_usdt_pairs(self) -> List[str]:
+        """
+        Obtiene todos los pares que terminan en USDT
+        """
+        try:
+            exchange_info = self.client.get_exchange_info()
+            symbols = []
+            for s in exchange_info['symbols']:
+                if s['symbol'].endswith('USDT') and s['status'] == 'TRADING':
+                    symbol = s['symbol']
+                    # Excluir stablecoins y pares no deseados
+                    if symbol not in config.EXCLUDED_SYMBOLS:
+                        symbols.append(symbol)
+            return symbols
+        except Exception as e:
+            print(f"Error obteniendo pares USDT: {e}")
+            return []
+
+    def get_24hr_tickers(self, use_cache: bool = True) -> List[Dict]:
+        """
+        Obtiene estadísticas de 24 horas para todos los pares
+        """
+        if use_cache and self._ticker_cache and self._ticker_cache_time:
+            if time.time() - self._ticker_cache_time < self._cache_duration:
+                return self._ticker_cache
+
+        try:
+            tickers = self.client.get_ticker()
+            self._ticker_cache = tickers
+            self._ticker_cache_time = time.time()
+            return tickers
+        except Exception as e:
+            print(f"Error obteniendo tickers 24hr: {e}")
+            return self._ticker_cache or []
+
+    def get_low_cap_altcoins(self, limit: int = None) -> List[str]:
+        """
+        Identifica altcoins de baja capitalización basado en volumen 24h
+        """
+        if limit is None:
+            limit = config.NUM_COINS_TO_MONITOR
+
+        tickers = self.get_24hr_tickers()
+        usdt_pairs = self.get_all_usdt_pairs()
+        usdt_set = set(usdt_pairs)
+
+        # Filtrar pares USDT válidos y calcular "capitalización estimada"
+        candidates = []
+        for ticker in tickers:
+            symbol = ticker['symbol']
+            if symbol not in usdt_set:
+                continue
+            if symbol == config.BTC_SYMBOL:
+                continue  # BTC se maneja por separado
+
+            try:
+                volume = float(ticker['quoteVolume'])  # Volumen en USDT
+                last_price = float(ticker['lastPrice'])
+
+                # Solo considerar pares con volumen significativo pero bajo
+                if volume > 0 and volume < config.LOW_CAP_VOLUME_THRESHOLD:
+                    candidates.append({
+                        'symbol': symbol,
+                        'volume': volume,
+                        'price': last_price,
+                        'change_24h': float(ticker['priceChangePercent'])
+                    })
+            except (KeyError, ValueError, TypeError):
+                continue
+
+        # Ordenar por volumen (menor a mayor = más baja capitalización)
+        candidates.sort(key=lambda x: x['volume'])
+
+        # Seleccionar las de menor volumen
+        selected = candidates[:limit]
+        return [c['symbol'] for c in selected]
+
+    def get_historical_klines(self, symbol: str, interval: str,
+                              lookback_days: int = 30) -> pd.DataFrame:
+        """
+        Obtiene velas históricas para un símbolo
+        """
+        try:
+            # Calcular fecha de inicio
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=lookback_days)
+
+            # Mapear intervalos
+            interval_map = {
+                "1w": Client.KLINE_INTERVAL_1WEEK,
+                "1M": Client.KLINE_INTERVAL_1MONTH,
+                "4h": Client.KLINE_INTERVAL_4HOUR,
+                "1h": Client.KLINE_INTERVAL_1HOUR,
+                "1d": Client.KLINE_INTERVAL_1DAY
+            }
+
+            binance_interval = interval_map.get(interval, Client.KLINE_INTERVAL_1DAY)
+
+            klines = self.client.get_historical_klines(
+                symbol, binance_interval,
+                start_time.strftime("%d %b %Y %H:%M:%S"),
+                end_time.strftime("%d %b %Y %H:%M:%S")
+            )
+
+            if not klines:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ])
+
+            # Convertir a numérico
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col])
+
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+
+            return df
+
+        except BinanceAPIException as e:
+            print(f"Error API Binance para {symbol}: {e}")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"Error obteniendo klines para {symbol}: {e}")
+            return pd.DataFrame()
+
+    def get_current_price(self, symbol: str) -> Optional[float]:
+        """
+        Obtiene el precio actual de un símbolo
+        """
+        try:
+            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            return float(ticker['price'])
+        except Exception as e:
+            print(f"Error obteniendo precio para {symbol}: {e}")
+            return None
+
+    def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
+        """
+        Obtiene precios actuales para múltiples símbolos
+        """
+        prices = {}
+        try:
+            all_prices = self.client.get_all_tickers()
+            price_dict = {p['symbol']: float(p['price']) for p in all_prices}
+
+            for symbol in symbols:
+                if symbol in price_dict:
+                    prices[symbol] = price_dict[symbol]
+        except Exception as e:
+            print(f"Error obteniendo precios múltiples: {e}")
+
+        return prices
+
+================================================================================
+========== sr_calculator.py ==========
+================================================================================
+"""
+Cálculo de niveles de soporte y resistencia
+"""
+
+import pandas as pd
+import numpy as np
+from typing import List, Dict, Tuple, Optional
+from scipy.signal import argrelextrema
+from sklearn.cluster import KMeans
+import config
+
+
+class SupportResistanceCalculator:
+    """Calculador de niveles de soporte y resistencia"""
+
+    def __init__(self, order: int = 5):
+        """
+        Args:
+            order: Número de puntos para identificar extremos locales
+        """
+        self.order = order
+
+    def find_local_extrema(self, df: pd.DataFrame, column: str = 'close',
+                           extrema_type: str = 'both') -> Dict[str, List[float]]:
+        """
+        Encuentra máximos y mínimos locales en una serie de precios
+        """
+        if df.empty or len(df) < self.order * 2:
+            return {'max': [], 'min': []}
+
+        series = df[column].values
+
+        # Encontrar máximos locales
+        if extrema_type in ['max', 'both']:
+            max_idx = argrelextrema(series, np.greater, order=self.order)[0]
+            max_values = series[max_idx].tolist()
+        else:
+            max_values = []
+
+        # Encontrar mínimos locales
+        if extrema_type in ['min', 'both']:
+            min_idx = argrelextrema(series, np.less, order=self.order)[0]
+            min_values = series[min_idx].tolist()
+        else:
+            min_values = []
+
+        return {'max': max_values, 'min': min_values}
+
+    def cluster_levels(self, levels: List[float], n_clusters: int = 3,
+                       eps: float = 0.02) -> List[float]:
+        """
+        Agrupa niveles similares usando K-Means para encontrar zonas clave
+        """
+        if not levels or len(levels) < 2:
+            return levels
+
+        # Limpiar niveles
+        levels = sorted([l for l in levels if l > 0])
+
+        if len(levels) <= n_clusters:
+            return levels
+
+        try:
+            X = np.array(levels).reshape(-1, 1)
+            kmeans = KMeans(n_clusters=min(n_clusters, len(levels)),
+                           random_state=42, n_init=10)
+            kmeans.fit(X)
+
+            # Obtener centros de los clusters
+            centers = sorted([c[0] for c in kmeans.cluster_centers_])
+
+            # Fusionar clusters muy cercanos
+            merged = []
+            for center in centers:
+                if not merged:
+                    merged.append(center)
+                elif abs(center - merged[-1]) / merged[-1] > eps:
+                    merged.append(center)
+                else:
+                    # Mantener el centro del cluster con más elementos
+                    pass
+
+            return merged
+
+        except Exception as e:
+            print(f"Error en clustering: {e}")
+            return levels[:n_clusters]
+
+    def calculate_pivot_levels(self, df: pd.DataFrame) -> Dict[str, float]:
+        """
+        Calcula niveles de pivot point clásicos
+        """
+        if df.empty or len(df) < 1:
+            return {}
+
+        last_candle = df.iloc[-1]
+        high = float(last_candle['high'])
+        low = float(last_candle['low'])
+        close = float(last_candle['close'])
+
+        pivot = (high + low + close) / 3
+
+        return {
+            'pivot': pivot,
+            'r1': 2 * pivot - low,
+            'r2': pivot + (high - low),
+            'r3': high + 2 * (pivot - low),
+            's1': 2 * pivot - high,
+            's2': pivot - (high - low),
+            's3': low - 2 * (high - pivot)
+        }
+
+    def get_support_resistance_levels(self, df: pd.DataFrame,
+                                      period_name: str) -> Dict[str, List[float]]:
+        """
+        Obtiene niveles de soporte y resistencia para un DataFrame
+        """
+        if df.empty:
+            return {'support': [], 'resistance': []}
+
+        # Encontrar extremos locales
+        extrema = self.find_local_extrema(df, 'high', 'max')
+        resistance_levels = extrema['max']
+
+        extrema = self.find_local_extrema(df, 'low', 'min')
+        support_levels = extrema['min']
+
+        # También usar precios de cierre para niveles adicionales
+        all_highs = df['high'].values
+        all_lows = df['low'].values
+
+        # Percentiles para niveles adicionales
+        if len(df) > 5:
+            resistance_levels.extend([
+                np.percentile(all_highs, 95),
+                np.percentile(all_highs, 90),
+                np.percentile(all_highs, 85)
+            ])
+
+            support_levels.extend([
+                np.percentile(all_lows, 5),
+                np.percentile(all_lows, 10),
+                np.percentile(all_lows, 15)
+            ])
+
+        # Agrupar niveles similares
+        support_clustered = self.cluster_levels(support_levels, n_clusters=4)
+        resistance_clustered = self.cluster_levels(resistance_levels, n_clusters=4)
+
+        # Añadir niveles de pivot point
+        pivot_levels = self.calculate_pivot_levels(df)
+        if pivot_levels:
+            support_clustered.extend([pivot_levels.get('s1', 0), pivot_levels.get('s2', 0)])
+            resistance_clustered.extend([pivot_levels.get('r1', 0), pivot_levels.get('r2', 0)])
+
+        # Filtrar y ordenar
+        current_price = df['close'].iloc[-1]
+
+        support_clustered = sorted([s for s in support_clustered if s > 0 and s < current_price])
+        resistance_clustered = sorted([r for r in resistance_clustered if r > 0 and r > current_price])
+
+        return {
+            'support': support_clustered,
+            'resistance': resistance_clustered
+        }
+
+    def get_all_levels(self, symbol: str, weekly_df: pd.DataFrame,
+                       monthly_df: pd.DataFrame) -> Dict:
+        """
+        Obtiene todos los niveles de soporte y resistencia para un símbolo
+        """
+        weekly_levels = self.get_support_resistance_levels(weekly_df, "1_week")
+        monthly_levels = self.get_support_resistance_levels(monthly_df, "1_month")
+
+        # Combinar niveles únicos
+        all_supports = sorted(list(set(weekly_levels['support'] + monthly_levels['support'])))
+        all_resistances = sorted(list(set(weekly_levels['resistance'] + monthly_levels['resistance'])))
+
+        return {
+            'symbol': symbol,
+            'supports': all_supports,
+            'resistances': all_resistances,
+            'weekly': weekly_levels,
+            'monthly': monthly_levels
+        }
+
+================================================================================
+========== alert_detector.py ==========
+================================================================================
+"""
+Detector de alertas cuando el precio toca soportes o resistencias
+"""
+
+from typing import Dict, List, Tuple, Optional
+import config
+
+
+class AlertDetector:
+    """Detector de alertas de trading"""
+
+    def __init__(self, margin_percent: float = None):
+        self.margin_percent = margin_percent or config.MARGIN_PERCENTAGE
+        self.last_alerts = {}  # Para evitar alertas repetitivas
+
+    def is_near_level(self, current_price: float, level: float) -> bool:
+        """
+        Verifica si el precio está cerca de un nivel (dentro del margen %)
+        """
+        if level <= 0:
+            return False
+
+        diff_percent = abs(current_price - level) / level * 100
+        return diff_percent <= self.margin_percent
+
+    def find_near_levels(self, current_price: float,
+                         levels: List[float]) -> List[Tuple[float, str]]:
+        """
+        Encuentra niveles cercanos al precio actual
+        """
+        near_levels = []
+        for level in levels:
+            if self.is_near_level(current_price, level):
+                # Determinar si es soporte o resistencia basado en el precio
+                if level < current_price:
+                    level_type = "SOPORTE"
+                else:
+                    level_type = "RESISTENCIA"
+                near_levels.append((level, level_type))
+        return near_levels
+
+    def check_coin_alerts(self, symbol: str, current_price: float,
+                          sr_levels: Dict) -> List[Dict]:
+        """
+        Verifica alertas para una moneda específica
+        """
+        alerts = []
+
+        if current_price is None:
+            return alerts
+
+        all_levels = sr_levels.get('supports', []) + sr_levels.get('resistances', [])
+
+        near_levels = self.find_near_levels(current_price, all_levels)
+
+        for level, level_type in near_levels:
+            # Determinar origen del nivel (semanal o mensual)
+            origin = []
+            if level in sr_levels.get('weekly', {}).get('support', []):
+                origin.append('Soporte Semanal')
+            if level in sr_levels.get('weekly', {}).get('resistance', []):
+                origin.append('Resistencia Semanal')
+            if level in sr_levels.get('monthly', {}).get('support', []):
+                origin.append('Soporte Mensual')
+            if level in sr_levels.get('monthly', {}).get('resistance', []):
+                origin.append('Resistencia Mensual')
+
+            origin_str = ' / '.join(origin) if origin else level_type
+
+            diff_percent = ((current_price - level) / level) * 100
+
+            alert = {
+                'symbol': symbol,
+                'current_price': current_price,
+                'level': level,
+                'level_type': level_type,
+                'origin': origin_str,
+                'diff_percent': diff_percent,
+                'timestamp': None  # Se añadirá después
+            }
+
+            # Evitar alertas duplicadas en corto tiempo
+            alert_key = f"{symbol}_{level}_{level_type}"
+            if self.should_send_alert(alert_key):
+                alerts.append(alert)
+                self.last_alerts[alert_key] = current_price
+
+        return alerts
+
+    def should_send_alert(self, alert_key: str) -> bool:
+        """
+        Verifica si se debe enviar una alerta (evita spam)
+        """
+        if alert_key not in self.last_alerts:
+            return True
+
+        # Aquí se podría añadir lógica de tiempo, por ahora siempre alerta
+        return True
+
+    def analyze_all_coins(self, prices: Dict[str, float],
+                          sr_data: Dict[str, Dict]) -> List[Dict]:
+        """
+        Analiza todas las monedas y retorna alertas
+        """
+        all_alerts = []
+
+        # Primero analizar BTC (prioridad)
+        if config.BTC_SYMBOL in prices and config.BTC_SYMBOL in sr_data:
+            btc_price = prices[config.BTC_SYMBOL]
+            btc_levels = sr_data[config.BTC_SYMBOL]
+            btc_alerts = self.check_coin_alerts(
+                config.BTC_SYMBOL, btc_price, btc_levels
+            )
+            for alert in btc_alerts:
+                alert['priority'] = 'HIGH'
+                alert['is_btc'] = True
+            all_alerts.extend(btc_alerts)
+
+        # Luego analizar altcoins
+        for symbol, price in prices.items():
+            if symbol == config.BTC_SYMBOL:
+                continue  # Ya analizado
+
+            if symbol in sr_data:
+                alerts = self.check_coin_alerts(symbol, price, sr_data[symbol])
+                for alert in alerts:
+                    alert['priority'] = 'NORMAL'
+                    alert['is_btc'] = False
+                all_alerts.extend(alerts)
+
+        return all_alerts
+
+================================================================================
+========== telegram_notifier.py ==========
+================================================================================
+"""
+Notificador de Telegram para enviar alertas
+"""
+
+import requests
+from typing import List, Dict
+from datetime import datetime
+import config
+
+
+class TelegramNotifier:
+    """Clase para enviar notificaciones a Telegram"""
+
+    def __init__(self):
+        self.token = config.TELEGRAM_BOT_TOKEN
+        self.chat_id = config.TELEGRAM_CHAT_ID
+        self.base_url = f"https://api.telegram.org/bot{self.token}"
+
+    def send_message(self, text: str, parse_mode: str = 'HTML') -> bool:
+        """
+        Envía un mensaje a Telegram
+        """
+        if not self.token or self.token == "TU_TOKEN_DE_BOT_AQUI":
+            print("⚠️ Token de Telegram no configurado. Mensaje no enviado.")
+            print(f"[SIMULACIÓN] {text}")
+            return False
+
+        try:
+            url = f"{self.base_url}/sendMessage"
+            payload = {
+                'chat_id': self.chat_id,
+                'text': text,
+                'parse_mode': parse_mode
+            }
+            response = requests.post(url, json=payload, timeout=10)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Error enviando mensaje a Telegram: {e}")
+            return False
+
+    def format_alert_message(self, alerts: List[Dict]) -> str:
+        """
+        Formatea las alertas para enviar a Telegram
+        """
+        if not alerts:
+            return ""
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Separar alertas de BTC (prioridad) y altcoins
+        btc_alerts = [a for a in alerts if a.get('is_btc', False)]
+        other_alerts = [a for a in alerts if not a.get('is_btc', False)]
+
+        lines = [
+            "🚨 <b>ALERTAS DE TRADING</b> 🚨",
+            f"📅 {now}",
+            "═" * 30
+        ]
+
+        # Alertas de BTC primero (prioridad)
+        if btc_alerts:
+            lines.append("")
+            lines.append("🔥 <b>⚠️ ALERTA PRIORITARIA - BITCOIN ⚠️</b> 🔥")
+            lines.append("")
+            for alert in btc_alerts:
+                lines.append(self._format_single_alert(alert))
+            lines.append("")
+            lines.append("💡 <i>Recuerda: cuando BTC se mueve, las altcoins lo siguen</i>")
+
+        # Alertas de altcoins
+        if other_alerts:
+            if btc_alerts:
+                lines.append("")
+                lines.append("─" * 30)
+            lines.append("")
+            lines.append("📊 <b>ALTCOINS EN NIVELES CLAVE</b>")
+            lines.append("")
+            for alert in other_alerts:
+                lines.append(self._format_single_alert(alert))
+
+        lines.append("")
+        lines.append("═" * 30)
+        lines.append(f"🤖 <i>Bot: {config.TELEGRAM_BOT_NAME}</i>")
+
+        return "\n".join(lines)
+
+    def _format_single_alert(self, alert: Dict) -> str:
+        """Formatea una alerta individual"""
+        symbol = alert['symbol'].replace('USDT', '')
+        price = alert['current_price']
+        level = alert['level']
+        diff = alert['diff_percent']
+
+        emoji = "🔴" if alert['level_type'] == "RESISTENCIA" else "🟢"
+        direction = "▲" if diff > 0 else "▼"
+
+        lines = [
+            f"{emoji} <b>${symbol}</b> {emoji}",
+            f"   💰 Precio actual: <code>${price:.8f}</code>",
+            f"   📍 Nivel ({alert['level_type']}): <code>${level:.8f}</code>",
+            f"   📈 Diferencia: {direction} {abs(diff):.2f}%",
+            f"   🏷️ Origen: {alert['origin']}"
+        ]
+        return "\n".join(lines)
+
+    def send_alerts(self, alerts: List[Dict]) -> bool:
+        """
+        Envía todas las alertas formateadas a Telegram
+        """
+        if not alerts:
+            print("✅ No hay alertas para enviar.")
+            return True
+
+        message = self.format_alert_message(alerts)
+        return self.send_message(message)
+
+    def send_status_update(self, coins_analyzed: int,
+                           total_alerts: int) -> bool:
+        """
+        Envía un mensaje de estado del sistema
+        """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        text = f"""
+🤖 <b>SISTEMA DE ALERTAS - ESTADO</b>
+📅 {now}
+════════════════════════════
+📊 Monedas analizadas: <b>{coins_analyzed}</b>
+🚨 Alertas detectadas: <b>{total_alerts}</b>
+────────────────────────────
+⏱️ Próximo análisis en 5 minutos
+        """
+        return self.send_message(text.strip())
+
+================================================================================
+========== main.py ==========
+================================================================================
+#!/usr/bin/env python3
+"""
+Sistema de Alertas de Trading para Binance
+Ejecución principal (manual o programada)
+"""
+
+import sys
+import time
+from datetime import datetime
+from typing import List, Dict
+
+from binance_client import BinanceClient
+from sr_calculator import SupportResistanceCalculator
+from alert_detector import AlertDetector
+from telegram_notifier import TelegramNotifier
+import config
+
+
+class CryptoAlertSystem:
+    """Sistema principal de alertas de trading"""
+
+    def __init__(self):
+        self.binance = BinanceClient()
+        self.sr_calc = SupportResistanceCalculator(order=3)
+        self.detector = AlertDetector()
+        self.notifier = TelegramNotifier()
+
+        # Para seguimiento de monedas analizadas
+        self.monitored_coins = []
+
+    def get_coins_to_monitor(self) -> List[str]:
+        """
+        Obtiene la lista de monedas a monitorear (BTC + altcoins low cap)
+        """
+        coins = []
+
+        # BTC siempre incluido
+        coins.append(config.BTC_SYMBOL)
+
+        # Obtener altcoins de baja capitalización
+        print("📊 Buscando altcoins de baja capitalización...")
+        altcoins = self.binance.get_low_cap_altcoins(limit=config.NUM_COINS_TO_MONITOR)
+
+        if not altcoins:
+            print("⚠️ No se encontraron altcoins. Usando lista de respaldo.")
+            altcoins = self._get_fallback_coins()
+
+        coins.extend(altcoins)
+        self.monitored_coins = coins
+
+        print(f"✅ Monedas a monitorear: {len(coins)}")
+        print(f"   BTC: {config.BTC_SYMBOL}")
+        print(f"   Altcoins ({len(altcoins)}): {', '.join(altcoins[:5])}...")
+
+        return coins
+
+    def _get_fallback_coins(self) -> List[str]:
+        """Lista de respaldo de altcoins de baja capitalización"""
+        return [
+            "TRUUSDT", "COTIUSDT", "REIUSDT", "DGBUSDT", "DOCKUSDT",
+            "FRONTUSDT", "NKNUSDT", "VITEUSDT", "DUSKUSDT", "PERLUSDT"
+        ]
+
+    def fetch_historical_data(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        Obtiene datos históricos para calcular soportes y resistencias
+        """
+        print("\n📈 Obteniendo datos históricos...")
+        sr_data = {}
+
+        for i, symbol in enumerate(symbols, 1):
+            print(f"   [{i}/{len(symbols)}] Procesando {symbol}...", end=" ")
+
+            # Datos semanales
+            weekly_df = self.binance.get_historical_klines(
+                symbol, "1w", lookback_days=90
+            )
+
+            # Datos mensuales
+            monthly_df = self.binance.get_historical_klines(
+                symbol, "1M", lookback_days=180
+            )
+
+            if weekly_df.empty and monthly_df.empty:
+                print("❌ Sin datos")
+                continue
+
+            # Calcular niveles
+            levels = self.sr_calc.get_all_levels(symbol, weekly_df, monthly_df)
+            sr_data[symbol] = levels
+
+            num_supports = len(levels.get('supports', []))
+            num_resistances = len(levels.get('resistances', []))
+            print(f"✅ S:{num_supports} R:{num_resistances}")
+
+        return sr_data
+
+    def fetch_current_prices(self, symbols: List[str]) -> Dict[str, float]:
+        """
+        Obtiene precios actuales de todas las monedas
+        """
+        print("\n💰 Obteniendo precios actuales...")
+        prices = self.binance.get_multiple_prices(symbols)
+
+        for symbol, price in prices.items():
+            print(f"   {symbol}: ${price:.8f}" if price < 1 else f"   {symbol}: ${price:.4f}")
+
+        return prices
+
+    def run_analysis(self) -> List[Dict]:
+        """
+        Ejecuta el análisis completo y retorna alertas
+        """
+        print("\n" + "="*50)
+        print(f"🚀 INICIANDO ANÁLISIS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*50)
+
+        # 1. Obtener monedas a monitorear
+        coins = self.get_coins_to_monitor()
+
+        # 2. Obtener datos históricos y calcular S/R
+        sr_data = self.fetch_historical_data(coins)
+
+        # 3. Obtener precios actuales
+        symbols_with_data = list(sr_data.keys())
+        prices = self.fetch_current_prices(symbols_with_data)
+
+        # 4. Detectar alertas
+        print("\n🔍 Detectando niveles cercanos (margen {}%)...".format(
+            config.MARGIN_PERCENTAGE
+        ))
+        alerts = self.detector.analyze_all_coins(prices, sr_data)
+
+        # 5. Mostrar resumen
+        print(f"\n📊 RESUMEN DEL ANÁLISIS:")
+        print(f"   Monedas analizadas: {len(symbols_with_data)}")
+        print(f"   Alertas detectadas: {len(alerts)}")
+
+        btc_alerts = [a for a in alerts if a.get('is_btc', False)]
+        if btc_alerts:
+            print(f"\n   🔥 ALERTAS DE BTC (PRIORITARIAS): {len(btc_alerts)}")
+
+        return alerts
+
+    def run(self, send_telegram: bool = True):
+        """
+        Ejecuta el sistema completo
+        """
+        try:
+            alerts = self.run_analysis()
+
+            if send_telegram:
+                if alerts:
+                    print("\n📤 Enviando alertas a Telegram...")
+                    self.notifier.send_alerts(alerts)
+                else:
+                    print("\n✅ No se detectaron alertas.")
+                    # Opcional: enviar mensaje de estado
+                    self.notifier.send_status_update(
+                        len(self.monitored_coins), len(alerts)
+                    )
+
+            print("\n✨ Análisis completado exitosamente!")
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Ejecución interrumpida por el usuario.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ Error durante la ejecución: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+
+def main():
+    """Función principal"""
+    print("""
+    ╔══════════════════════════════════════════════╗
+    ║   🚀 SISTEMA DE ALERTAS DE TRADING v1.0    ║
+    ║   Binance + Telegram                        ║
+    ╚══════════════════════════════════════════════╝
+    """)
+
+    # Verificar configuración de Telegram
+    if config.TELEGRAM_BOT_TOKEN == "TU_TOKEN_DE_BOT_AQUI":
+        print("⚠️ ADVERTENCIA: Token de Telegram no configurado.")
+        print("   Las alertas se mostrarán solo en consola.")
+        print("   Edita config.py para agregar tu token.\n")
+
+    system = CryptoAlertSystem()
+    system.run(send_telegram=True)
+
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+========== scheduler.py ==========
+================================================================================
+#!/usr/bin/env python3
+"""
+Programador para ejecutar el sistema cada 5 minutos
+"""
+
+import schedule
+import time
+import signal
+import sys
+from datetime import datetime
+from main import CryptoAlertSystem
+
+
+class AlertScheduler:
+    """Programador de alertas automáticas"""
+
+    def __init__(self):
+        self.system = CryptoAlertSystem()
+        self.running = True
+
+        # Configurar señales para cierre graceful
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
+    def signal_handler(self, sig, frame):
+        """Maneja señales de interrupción"""
+        print("\n\n🛑 Deteniendo el programador...")
+        self.running = False
+        sys.exit(0)
+
+    def run_analysis_job(self):
+        """Tarea programada que ejecuta el análisis"""
+        print("\n" + "🔄" * 25)
+        print(f"⏰ EJECUCIÓN PROGRAMADA - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("🔄" * 25)
+
+        try:
+            self.system.run(send_telegram=True)
+        except Exception as e:
+            print(f"❌ Error en ejecución programada: {e}")
+
+        print(f"\n⏱️ Próxima ejecución en 5 minutos...")
+
+    def start(self):
+        """Inicia el programador"""
+        print("""
+    ╔══════════════════════════════════════════════╗
+    ║   🤖 SISTEMA DE ALERTAS AUTOMÁTICO         ║
+    ║   Ejecución cada 5 minutos                  ║
+    ╚══════════════════════════════════════════════╝
+        """)
+
+        # Programar tarea cada 5 minutos
+        schedule.every(5).minutes.do(self.run_analysis_job)
+
+        # Ejecutar inmediatamente la primera vez
+        print("🚀 Ejecutando primer análisis...")
+        self.run_analysis_job()
+
+        # Bucle principal
+        print("\n⏳ Esperando próxima ejecución...")
+        print("   Presiona Ctrl+C para detener.\n")
+
+        while self.running:
+            try:
+                schedule.run_pending()
+                time.sleep(1)
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"Error en el bucle principal: {e}")
+                time.sleep(5)
+
+
+def main():
+    """Función principal del scheduler"""
+    scheduler = AlertScheduler()
+
+    try:
+        scheduler.start()
+    except KeyboardInterrupt:
+        print("\n\n👋 Programa detenido por el usuario.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+========== requirements.txt ==========
+================================================================================
+# Dependencias del sistema de alertas de trading
+
+# API de Binance
+python-binance>=1.0.20
+
+# Procesamiento de datos
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning para clustering de niveles
+scikit-learn>=1.3.0
+
+# Procesamiento de señales para extremos locales
+scipy>=1.10.0
+
+# Programación de tareas
+schedule>=1.2.0
+
+# Peticiones HTTP (para Telegram)
+requests>=2.31.0
+
+================================================================================
+========== README.md ==========
+================================================================================
+# 🚀 Sistema de Alertas de Trading - Binance + Telegram
+
+Sistema automatizado que monitorea BTC y altcoins de baja capitalización en Binance, detecta cuando los precios se acercan a niveles de soporte/resistencia y envía alertas a Telegram.
+
+## ✨ Características
+
+- 📡 Conexión a API pública de Binance (sin necesidad de API keys)
+- 📊 Análisis de al menos 10 monedas (BTC + 9 altcoins low-cap)
+- 📈 Cálculo de soportes y resistencias semanales y mensuales
+- 🔔 Detección de toques con margen de sensibilidad del 1%
+- 🔥 Prioridad para alertas de BTC
+- 📱 Notificaciones a Telegram
+- ⏱️ Ejecución manual o automática cada 5 minutos
+- 🎯 Enfoque en temporalidad de 4 horas para entradas
+
+## 📋 Requisitos
+
+- Python 3.8 o superior
+- pip (gestor de paquetes de Python)
+- Bot de Telegram (creado con BotFather)
+
+## 🔧 Instalación
+
+### 1. Clonar o descargar el proyecto
+
+```bash
+unzip crypto_alert_system.zip
+cd crypto_alert_system

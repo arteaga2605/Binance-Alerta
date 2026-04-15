@@ -1,0 +1,20 @@
+# Dependencias del sistema de alertas de trading
+
+# API de Binance
+python-binance>=1.0.20
+
+# Procesamiento de datos
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning para clustering de niveles
+scikit-learn>=1.3.0
+
+# Procesamiento de señales para extremos locales
+scipy>=1.10.0
+
+# Programación de tareas
+schedule>=1.2.0
+
+# Peticiones HTTP (para Telegram)
+requests>=2.31.0
