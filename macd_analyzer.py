@@ -23,6 +23,8 @@ class MACDAnalyzer:
         self.analysis_tf = config.MACD_ANALYSIS_TIMEFRAME
         self.cooldown_hours = config.MACD_COOLDOWN_HOURS
         self.cooldown_file = config.MACD_COOLDOWN_FILE
+        self.atr_period = getattr(config, 'MACD_ATR_PERIOD', 14)
+        self.atr_multiplier = getattr(config, 'MACD_ATR_MULTIPLIER', 1.5)
         self.last_alerts = self._load_cooldown()
 
     def _load_cooldown(self) -> Dict[str, str]:
@@ -64,6 +66,23 @@ class MACDAnalyzer:
             'histogram': histogram
         }, index=df.index)
         return result
+
+    def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> Optional[float]:
+        """Calcula el Average True Range (ATR) para el último período."""
+        if df.empty or len(df) < period + 1:
+            return None
+
+        high = df['high']
+        low = df['low']
+        close = df['close']
+
+        tr1 = high - low
+        tr2 = (high - close.shift()).abs()
+        tr3 = (low - close.shift()).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        atr = tr.rolling(window=period).mean().iloc[-1]
+        return float(atr) if not pd.isna(atr) else None
 
     def detect_cross(self, macd_df: pd.DataFrame) -> Optional[str]:
         """
@@ -109,8 +128,7 @@ class MACDAnalyzer:
         Analiza un símbolo usando MACD en la temporalidad configurada.
         Retorna un diccionario con la alerta si hay señal y pasa el cooldown.
         """
-        # Obtener datos históricos (más días para asegurar suficientes velas)
-        lookback = max(60, (self.slow + self.signal_period) * 2)
+        lookback = max(60, (self.slow + self.signal_period + self.atr_period) * 2)
         df = self.client.get_historical_klines(symbol, self.analysis_tf, lookback_days=lookback)
 
         if df.empty or len(df) < self.slow + self.signal_period:
@@ -124,7 +142,6 @@ class MACDAnalyzer:
         if not cross:
             return None
 
-        # Verificar cooldown
         if not self.should_send_alert(symbol):
             return None
 
@@ -133,32 +150,41 @@ class MACDAnalyzer:
         signal_val = macd_df['signal'].iloc[-1]
         histogram = macd_df['histogram'].iloc[-1]
 
-        # Crear alerta
+        # Calcular movimiento potencial basado en ATR
+        atr = self.calculate_atr(df, self.atr_period)
+        potential_move_percent = None
+        if atr is not None and current_price > 0:
+            move_abs = atr * self.atr_multiplier
+            percent = (move_abs / current_price) * 100
+            # Para señal bajista, el movimiento esperado es negativo
+            if cross == 'bearish':
+                potential_move_percent = -percent
+            else:
+                potential_move_percent = percent
+
         alert = {
             'symbol': symbol,
             'current_price': current_price,
-            'signal_type': cross,  # 'bullish' o 'bearish'
+            'signal_type': cross,
             'macd_value': macd_val,
             'signal_value': signal_val,
             'histogram': histogram,
             'analysis_timeframe': self.analysis_tf,
+            'potential_move_percent': potential_move_percent,
+            'atr': atr,
             'timestamp': datetime.now(),
             'analyst': 'MACD'
         }
 
-        # Actualizar cooldown
         self.update_cooldown(symbol)
         return alert
 
     def analyze_multiple(self, symbols: List[str]) -> List[Dict]:
-        """
-        Analiza una lista de símbolos y retorna todas las alertas generadas.
-        """
+        """Analiza una lista de símbolos y retorna todas las alertas generadas."""
         alerts = []
         for symbol in symbols:
             alert = self.analyze_symbol(symbol)
             if alert:
-                # Marcar si es BTC para prioridad
                 alert['is_btc'] = (symbol == config.BTC_SYMBOL)
                 alert['priority'] = 'HIGH' if alert['is_btc'] else 'NORMAL'
                 alerts.append(alert)

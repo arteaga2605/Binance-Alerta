@@ -55,7 +55,7 @@ class BinanceClient:
             # USDⓈ-M Futures
             um_exchange_info = self.client.futures_exchange_info()
             for s in um_exchange_info['symbols']:
-                if s['status'] == 'TRADING':
+                if s.get('status') == 'TRADING':
                     symbols.add(s['symbol'])
         except Exception as e:
             print(f"Error obteniendo símbolos USDⓈ-M Futures: {e}")
@@ -64,7 +64,8 @@ class BinanceClient:
             # COIN-M Futures
             cm_exchange_info = self.client.futures_coin_exchange_info()
             for s in cm_exchange_info['symbols']:
-                if s['status'] == 'TRADING':
+                # En COIN-M el campo es 'contractStatus' en lugar de 'status'
+                if s.get('contractStatus') == 'TRADING':
                     symbols.add(s['symbol'])
         except Exception as e:
             print(f"Error obteniendo símbolos COIN-M Futures: {e}")

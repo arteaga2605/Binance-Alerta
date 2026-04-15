@@ -34,6 +34,11 @@ class TelegramNotifier:
                 'parse_mode': parse_mode
             }
             response = requests.post(url, json=payload, timeout=10)
+            # --- DEPURACIÓN ---
+            print(f"[Telegram] Código de respuesta: {response.status_code}")
+            if response.status_code != 200:
+                print(f"[Telegram] Error: {response.text}")
+            # ------------------
             return response.status_code == 200
         except Exception as e:
             print(f"Error enviando mensaje a Telegram: {e}")
@@ -101,16 +106,21 @@ class TelegramNotifier:
         price = alert['current_price']
         level = alert['level']
         diff = alert['diff_percent']
+        potential = alert.get('potential_move_percent')
         emoji = "🔴" if alert['level_type'] == "RESISTENCIA" else "🟢"
         direction = "▲" if diff > 0 else "▼"
 
-        return (
-            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})\n"
-            f"   💰 Precio: ${price:.8f}\n"
-            f"   📍 Nivel ({alert['level_type']}): ${level:.8f}\n"
-            f"   📈 Diferencia: {direction} {abs(diff):.2f}%\n"
+        lines = [
+            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})",
+            f"   💰 Precio: ${price:.8f}",
+            f"   📍 Nivel ({alert['level_type']}): ${level:.8f}",
+            f"   📈 Diferencia: {direction} {abs(diff):.2f}%",
             f"   🏷️ Origen: {alert['origin']}"
-        )
+        ]
+        if potential is not None:
+            sign = "+" if potential > 0 else ""
+            lines.append(f"   🎯 Movimiento potencial estimado: {sign}{potential:.2f}%")
+        return "\n".join(lines)
 
     def _format_macd_alert(self, alert: Dict) -> str:
         """Formatea una alerta MACD."""
@@ -121,6 +131,7 @@ class TelegramNotifier:
         macd_val = alert['macd_value']
         signal_val = alert['signal_value']
         hist = alert['histogram']
+        potential = alert.get('potential_move_percent')
 
         if signal_type == 'bullish':
             emoji = "📈🐂"
@@ -129,14 +140,18 @@ class TelegramNotifier:
             emoji = "📉🐻"
             text_signal = "CRUCE BAJISTA (MACD < Señal)"
 
-        return (
-            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})\n"
-            f"   💰 Precio: ${price:.8f}\n"
-            f"   📊 MACD: {macd_val:.8f} | Señal: {signal_val:.8f}\n"
-            f"   📉 Histograma: {hist:.8f}\n"
-            f"   ⏱️ Temporalidad análisis: {alert['analysis_timeframe']}\n"
+        lines = [
+            f"{emoji} <b>{full_name}</b> ({symbol.replace('USDT', '')})",
+            f"   💰 Precio: ${price:.8f}",
+            f"   📊 MACD: {macd_val:.8f} | Señal: {signal_val:.8f}",
+            f"   📉 Histograma: {hist:.8f}",
+            f"   ⏱️ Temporalidad análisis: {alert['analysis_timeframe']}",
             f"   🏷️ Señal: {text_signal}"
-        )
+        ]
+        if potential is not None:
+            sign = "+" if potential > 0 else ""
+            lines.append(f"   🎯 Movimiento potencial estimado: {sign}{potential:.2f}%")
+        return "\n".join(lines)
 
     def send_combined_alerts(self, sr_alerts: List[Dict], macd_alerts: List[Dict]) -> bool:
         """
@@ -150,20 +165,15 @@ class TelegramNotifier:
         return self.send_message(message)
 
     def send_alerts(self, alerts: List[Dict]) -> bool:
-        """
-        Método legacy (compatibilidad). Se recomienda usar send_combined_alerts.
-        """
+        """Método legacy (compatibilidad)."""
         if not alerts:
             return True
-        # Distinguir por campo 'analyst' para mantener compatibilidad
         sr = [a for a in alerts if a.get('analyst') == 'S/R']
         macd = [a for a in alerts if a.get('analyst') == 'MACD']
         return self.send_combined_alerts(sr, macd)
 
     def send_status_update(self, coins_analyzed: int, total_alerts: int) -> bool:
-        """
-        Envía un mensaje de estado del sistema
-        """
+        """Envía un mensaje de estado del sistema."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         text = f"""

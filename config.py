@@ -30,6 +30,8 @@ MACD_SIGNAL = 9                  # Período de la señal EMA
 MACD_ANALYSIS_TIMEFRAME = "1d"   # Temporalidad para calcular MACD ("1d" o "1w")
 MACD_COOLDOWN_HOURS = 6          # Cooldown independiente para alertas MACD
 MACD_COOLDOWN_FILE = os.path.join(os.path.dirname(__file__), "alert_cooldown_macd.json")
+MACD_ATR_PERIOD = 14             # Período para calcular ATR (volatilidad)
+MACD_ATR_MULTIPLIER = 1.5        # Multiplicador del ATR para estimar movimiento potencial
 
 # Intervalos de tiempo para soportes/resistencias
 SR_PERIODS = {
